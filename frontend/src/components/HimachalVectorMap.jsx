@@ -87,7 +87,7 @@ export default function HimachalVectorMap({
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    const svg = mapContainerRef.current.querySelector("svg");
+    const svg = mapContainerRef.current.querySelector(".district-map");
     const districts = svg.querySelectorAll("path[id]");
 
     let activeDistrict = null;
@@ -331,7 +331,10 @@ filter .25s cubic-bezier(.4,0,.2,1)";
       </div>
 
       {/* 3. Alpine Framed Interactive Map Vector Viewport */}
-      <div className="relative h-[540px] rounded-2xl border border-stone-200 bg-[#F8FAFC] overflow-hidden">
+      <div
+        ref={mapContainerRef}
+        className="relative h-[540px] w-full rounded-2xl border border-stone-200 bg-[#F8FAFC] overflow-hidden"
+      >
         <TransformWrapper
           initialScale={1}
           minScale={1}
@@ -367,10 +370,10 @@ filter .25s cubic-bezier(.4,0,.2,1)";
               </div>
 
               <TransformComponent
-                wrapperClass="!w-full !h-full"
+                wrapperClass="!w-full !h-[455px]"
                 contentClass="!w-full !h-full flex items-center justify-center"
               >
-                <HimachalDistricts className="max-h-full max-w-full transition-all duration-300" />
+                <HimachalDistricts className="district-map max-h-full max-w-full transition-all duration-300" />
               </TransformComponent>
             </>
           )}
