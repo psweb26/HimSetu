@@ -4,7 +4,10 @@ import {
   ChevronRight,
   MapPin,
   Search,
-  SlidersHorizontal,
+  Building2,
+  AlertCircle,
+  Flame,
+  Clock,
   ThumbsUp,
 } from "lucide-react";
 
@@ -63,40 +66,47 @@ function formatRelativeTime(value, nowMs) {
   }
 
   if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
+    return `${diffMinutes}m`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h ago`;
+    return `${diffHours}h`;
   }
 
   const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
+  return `${diffDays}d`;
+}
+
+function getPriorityBorderColor(priority) {
+  const colors = {
+    critical: "border-l-[var(--pahadi-crimson)]",
+    high: "border-l-[var(--kinnaur-marigold)]",
+    medium: "border-l-blue-400",
+    low: "border-l-emerald-400",
+  };
+  return colors[priority] || colors.medium;
+}
+
+function getPriorityIcon(priority) {
+  const icons = {
+    critical: Flame,
+    high: AlertCircle,
+    medium: Clock,
+    low: Clock,
+  };
+  return icons[priority] || Clock;
 }
 
 function getStatusClass(status) {
   const styles = {
-    Pending: "border-amber-200 bg-amber-50 text-amber-900",
-    "Under Verification": "border-sky-200 bg-sky-50 text-sky-900",
-    "Verified Resolved": "border-emerald-200 bg-emerald-50 text-emerald-900",
-    "Reopened via Citizen Veto":
-      "border-[var(--pahadi-crimson)]/30 bg-rose-50 text-[var(--pahadi-crimson)]",
+    Pending: "bg-amber-100 text-amber-800 border-amber-200",
+    "Under Verification": "bg-sky-100 text-sky-800 border-sky-200",
+    "Verified Resolved": "bg-emerald-100 text-emerald-800 border-emerald-200",
+    "Reopened via Citizen Veto": "bg-[var(--pahadi-crimson)]/10 text-[var(--pahadi-crimson)] border-[var(--pahadi-crimson)]/30",
   };
 
-  return styles[status] || "border-slate-200 bg-slate-50 text-slate-700";
-}
-
-function getPriorityClass(priority) {
-  const styles = {
-    critical:
-      "border-[var(--pahadi-crimson)]/35 bg-rose-50 text-[var(--pahadi-crimson)]",
-    high: "border-[var(--kinnaur-marigold)]/45 bg-amber-50 text-amber-950",
-    medium: "border-slate-200 bg-slate-50 text-slate-800",
-    low: "border-slate-200 bg-white text-slate-600",
-  };
-
-  return styles[priority] || styles.medium;
+  return styles[status] || "bg-slate-100 text-slate-700 border-slate-200";
 }
 
 function getUniqueOptions(values) {
@@ -214,12 +224,29 @@ export default function IncidentQueue({
   }
 
   const controlClass =
-    "h-9 rounded-sm border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-[var(--devdar-forest)] focus:ring-2 focus:ring-[var(--devdar-forest)]/10";
+    "h-9 rounded-sm border border-[var(--him-stone)] bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-[var(--devdar-forest)] focus:ring-2 focus:ring-[var(--devdar-forest)]/10";
+
+  const activeFilters = [
+    statusFilter !== ALL_FILTER && `Status: ${statusFilter}`,
+    priorityFilter !== ALL_FILTER && `Priority: ${priorityLabels[priorityFilter]}`,
+    districtFilter !== ALL_FILTER && `District: ${districtFilter}`,
+  ].filter(Boolean);
 
   return (
-    <div className="mt-5">
-      <div className="rounded-sm border border-slate-200 bg-[#F8FAFC] p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(260px,1fr)_repeat(4,minmax(150px,auto))]">
+    <div className="space-y-4">
+      {/* GIS-STYLE TOOLBAR */}
+      <div className="kathkuni-card bg-white p-4 space-y-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-[var(--kinnaur-marigold)] mb-2">
+            GIS Operations Toolbar
+          </p>
+          <h3 className="text-sm font-black text-[var(--devdar-forest)] uppercase tracking-tight">
+            District Operations Queue
+          </h3>
+        </div>
+
+        {/* SEARCH & FILTERS */}
+        <div className="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_120px_120px_120px_120px]">
           <label className="relative block">
             <span className="sr-only">Search incidents</span>
             <Search
@@ -228,206 +255,205 @@ export default function IncidentQueue({
             />
             <input
               className={cx(controlClass, "w-full pl-9")}
-              placeholder="Search incidents"
+              placeholder="🔍 Search by ID, title, location"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
             />
           </label>
 
-          <label className="block">
-            <span className="sr-only">Status filter</span>
-            <select
-              className={cx(controlClass, "w-full")}
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-            >
-              <option value={ALL_FILTER}>All status</option>
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
+          <select
+            className={cx(controlClass, "w-full")}
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            title="Filter by incident status"
+          >
+            <option value={ALL_FILTER}>All Status</option>
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
 
-          <label className="block">
-            <span className="sr-only">Priority filter</span>
-            <select
-              className={cx(controlClass, "w-full")}
-              value={priorityFilter}
-              onChange={(event) => setPriorityFilter(event.target.value)}
-            >
-              <option value={ALL_FILTER}>All priority</option>
-              {Object.keys(priorityRank).map((priority) => (
-                <option key={priority} value={priority}>
-                  {priorityLabels[priority] || toTitleCase(priority)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <select
+            className={cx(controlClass, "w-full")}
+            value={priorityFilter}
+            onChange={(event) => setPriorityFilter(event.target.value)}
+            title="Filter by priority"
+          >
+            <option value={ALL_FILTER}>All Priority</option>
+            {Object.keys(priorityRank).map((priority) => (
+              <option key={priority} value={priority}>
+                {priorityLabels[priority] || toTitleCase(priority)}
+              </option>
+            ))}
+          </select>
 
-          <label className="block">
-            <span className="sr-only">District filter</span>
-            <select
-              className={cx(controlClass, "w-full")}
-              value={districtFilter}
-              onChange={(event) => setDistrictFilter(event.target.value)}
-            >
-              <option value={ALL_FILTER}>All districts</option>
-              {districtOptions.map((district) => (
-                <option key={district} value={district}>
-                  {district}
-                </option>
-              ))}
-            </select>
-          </label>
+          <select
+            className={cx(controlClass, "w-full")}
+            value={districtFilter}
+            onChange={(event) => setDistrictFilter(event.target.value)}
+            title="Filter by district"
+          >
+            <option value={ALL_FILTER}>All Districts</option>
+            {districtOptions.map((district) => (
+              <option key={district} value={district}>
+                {district}
+              </option>
+            ))}
+          </select>
 
-          <label className="block">
-            <span className="sr-only">Sort incidents</span>
-            <select
-              className={cx(controlClass, "w-full")}
-              value={sortBy}
-              onChange={(event) => setSortBy(event.target.value)}
-            >
-              {sortOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  Sort: {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <select
+            className={cx(controlClass, "w-full")}
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value)}
+            title="Sort incidents"
+          >
+            {sortOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
-          <span className="inline-flex items-center gap-1.5">
-            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-            Civic operations queue
-          </span>
-          <span>{filteredTickets.length} incidents</span>
+        {/* TOOLBAR INFO */}
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--him-stone)] pt-3">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
+            <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{filteredTickets.length} Incident{filteredTickets.length !== 1 ? 's' : ''}</span>
+            {districtFilter !== ALL_FILTER && (
+              <span className="text-[var(--devdar-forest)]">• {districtFilter}</span>
+            )}
+          </div>
+          {activeFilters.length > 0 && (
+            <div className="flex items-center gap-2 text-[9px] font-bold text-slate-500">
+              <span>Active:</span>
+              <span className="text-[var(--kinnaur-marigold)]">{activeFilters.join(" • ")}</span>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
-        <div className="min-w-[1060px]">
-          <div className="grid grid-cols-[96px_minmax(260px,1fr)_112px_132px_100px_80px_82px_132px] gap-2 border-y border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
-            <span>Incident ID</span>
-            <span>Title</span>
-            <span>District</span>
-            <span>Status</span>
-            <span>Priority</span>
-            <span>Upvotes</span>
-            <span className="inline-flex items-center gap-1">
-              Created
-              <ArrowUpDown className="h-3 w-3" aria-hidden="true" />
-            </span>
-            <span>Workspace</span>
-          </div>
+      {/* INCIDENT ROWS */}
+      <div className="space-y-2">
+        {filteredTickets.length > 0 ? (
+          filteredTickets.map((ticket) => {
+            const effectivePriority = getEffectivePriority(
+              ticket,
+              criticalThreshold,
+            );
+            const isSelected = selectedTicketId === ticket.id;
+            const PriorityIcon = getPriorityIcon(effectivePriority);
 
-          <div className="max-h-[520px] overflow-y-auto">
-            {filteredTickets.length > 0 ? (
-              filteredTickets.map((ticket) => {
-                const effectivePriority = getEffectivePriority(
-                  ticket,
-                  criticalThreshold,
-                );
-                const isSelected = selectedTicketId === ticket.id;
+            return (
+              <article
+                key={ticket.id}
+                aria-current={isSelected ? "true" : undefined}
+                className={cx(
+                  "group rounded-sm border-l-4 border-r border-t border-b transition-all duration-200 cursor-pointer",
+                  getPriorityBorderColor(effectivePriority),
+                  "hover:shadow-xs hover:-translate-y-0.5",
+                  isSelected
+                    ? "border-[var(--him-stone)] bg-[var(--devdar-forest)]/5 ring-1 ring-[var(--devdar-forest)]/20"
+                    : "border-[var(--him-stone)] bg-white hover:border-[var(--devdar-forest)]/50",
+                )}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelectIncident(ticket)}
+                onKeyDown={(event) => handleRowKeyDown(event, ticket)}
+              >
+                <div className="flex items-center justify-between gap-3 p-3">
+                  {/* LEFT: Priority Icon + ID + Title */}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-sm border border-[var(--him-stone)] bg-[#F8FAFB]">
+                      <PriorityIcon className="h-4 w-4 text-[var(--devdar-forest)]" aria-hidden="true" />
+                    </div>
 
-                return (
-                  <article
-                    key={ticket.id}
-                    aria-current={isSelected ? "true" : undefined}
-                    className={cx(
-                      "grid grid-cols-[96px_minmax(260px,1fr)_112px_132px_100px_80px_82px_132px] items-center gap-2 border-b px-3 py-2 text-left transition-all duration-200",
-                      "cursor-pointer focus-within:bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:bg-white",
-                      isSelected
-                        ? "border-[var(--devdar-forest)] bg-emerald-50/45 ring-1 ring-[var(--devdar-forest)]/20"
-                        : "border-slate-200 bg-white",
-                    )}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onSelectIncident(ticket)}
-                    onKeyDown={(event) => handleRowKeyDown(event, ticket)}
-                  >
-                    <span className="truncate font-mono text-[11px] font-black text-[var(--devdar-forest)]">
-                      {ticket.id}
-                    </span>
-
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-bold leading-5 text-slate-900">
-                        {ticket.title}
-                      </span>
-                      <span className="block truncate text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] font-black text-[var(--devdar-forest)] shrink-0">
+                          {ticket.id}
+                        </span>
+                        <span className="truncate text-xs font-bold text-slate-900">
+                          {ticket.title}
+                        </span>
+                      </div>
+                      <span className="text-[9px] text-slate-500 font-medium uppercase tracking-wide">
                         {ticket.block} / {ticket.panchayat}
                       </span>
+                    </div>
+                  </div>
+
+                  {/* CENTER: District + Status + Department */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 text-[var(--devdar-forest)]" aria-hidden="true" />
+                      <span className="text-[10px] font-bold text-slate-700 whitespace-nowrap">
+                        {ticket.district}
+                      </span>
+                    </div>
+
+                    <span className={cx(
+                      "inline-flex items-center rounded-xs border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide whitespace-nowrap",
+                      getStatusClass(ticket.status),
+                    )}>
+                      {ticket.status === "Verified Resolved" ? "Resolved" : ticket.status}
                     </span>
 
-                    <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-bold text-slate-700">
-                      <MapPin
-                        className="h-3.5 w-3.5 shrink-0 text-[var(--devdar-forest)]"
-                        aria-hidden="true"
-                      />
-                      <span className="truncate">{ticket.district}</span>
-                    </span>
+                    {ticket.department && (
+                      <div className="flex items-center gap-1">
+                        <Building2 className="h-3.5 w-3.5 text-sky-600" aria-hidden="true" />
+                        <span className="text-[9px] font-semibold text-sky-700 whitespace-nowrap max-w-[100px] truncate">
+                          {ticket.department}
+                        </span>
+                      </div>
+                    )}
+                  </div>
 
-                    <span
-                      className={cx(
-                        "inline-flex w-fit max-w-full items-center rounded-sm border px-2 py-1 text-[10px] font-black uppercase tracking-wide",
-                        getStatusClass(ticket.status),
-                      )}
-                    >
-                      <span className="truncate">{ticket.status}</span>
-                    </span>
-
-                    <span
-                      className={cx(
-                        "inline-flex w-fit items-center rounded-sm border px-2 py-1 text-[10px] font-black uppercase tracking-wide",
-                        getPriorityClass(effectivePriority),
-                      )}
-                    >
-                      {priorityLabels[effectivePriority] ||
-                        toTitleCase(effectivePriority)}
-                    </span>
-
+                  {/* RIGHT: Upvotes + Time + Control Room */}
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
-                      className="inline-flex h-8 w-fit items-center gap-1.5 rounded-sm border border-slate-200 bg-[#F8FAFC] px-2 text-xs font-black text-slate-800 transition hover:border-[var(--pahadi-crimson)]/30 hover:bg-rose-50"
+                      className="inline-flex h-7 items-center gap-1.5 rounded-xs border border-[var(--him-stone)] bg-[#F8FAFB] px-2 text-[9px] font-black text-slate-700 transition hover:border-[var(--pahadi-crimson)] hover:bg-rose-50 hover:text-[var(--pahadi-crimson)]"
                       type="button"
+                      title="Upvote this incident"
                       onClick={(event) => {
                         event.stopPropagation();
                         onUpvote?.(ticket.id);
                       }}
                     >
-                      <ThumbsUp
-                        className="h-3.5 w-3.5 text-[var(--pahadi-crimson)]"
-                        aria-hidden="true"
-                      />
-                      {ticket.upvotes}
+                      <ThumbsUp className="h-3 w-3" aria-hidden="true" />
+                      <span className="font-bold">{ticket.upvotes}</span>
                     </button>
 
-                    <span className="text-xs font-semibold text-slate-500">
+                    <span className="text-[9px] font-semibold text-slate-500 whitespace-nowrap w-10 text-right">
                       {formatRelativeTime(ticket.createdAt, nowMs)}
                     </span>
 
                     <button
-                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-[var(--devdar-forest)]/25 bg-white px-3 text-[10px] font-black uppercase tracking-wider text-[var(--devdar-forest)] transition hover:bg-[var(--devdar-forest)] hover:text-white"
+                      className="inline-flex h-7 items-center gap-1.5 rounded-xs border border-[var(--devdar-forest)]/30 bg-white px-2 text-[9px] font-black uppercase tracking-wider text-[var(--devdar-forest)] transition hover:border-[var(--devdar-forest)] hover:bg-[var(--devdar-forest)]/5 group-hover:border-[var(--devdar-forest)]"
                       type="button"
+                      title="Open control room for this incident"
                       onClick={(event) => {
                         event.stopPropagation();
                         onOpenWorkspace(ticket);
                       }}
                     >
-                      Open Workspace
-                      <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                      Control
+                      <ChevronRight className="h-3 w-3" aria-hidden="true" />
                     </button>
-                  </article>
-                );
-              })
-            ) : (
-              <div className="border-b border-slate-200 bg-white px-3 py-8 text-center text-xs font-semibold text-slate-500">
-                No incidents match the current queue filters.
-              </div>
-            )}
+                  </div>
+                </div>
+              </article>
+            );
+          })
+        ) : (
+          <div className="rounded-sm border border-dashed border-[var(--him-stone)] bg-[#F8FAFB] p-6 text-center">
+            <p className="text-xs font-semibold text-slate-500">
+              No incidents match the current filters.
+            </p>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
