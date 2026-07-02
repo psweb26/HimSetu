@@ -1,26 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Minus, RotateCcw, MapPin } from "lucide-react";
+import { Plus, Minus, RotateCcw, MapPin, Activity } from "lucide-react";
 
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 // SVG coordinate boundaries for active regions
 import HimachalDistricts from "../assets/himachal_districts.svg?react";
-
-/*
-const DISTRICT_COLORS = {
-  Chamba: "#C8D7F0", // Mist Blue
-  Kangra: "#E7C8C2", // Apple Blossom
-  Una: "#DDE8C8", // Terrace Green
-  Hamirpur: "#EFDDB8", // Wheat Gold
-  Bilaspur: "#C9D8D3", // River Stone
-  Solan: "#D4E4D2", // Pine Meadow
-  Sirmaur: "#D8C8E6", // Lavender Hills
-  Shimla: "#E8E1C7", // Heritage Cream
-  Kinnaur: "#E7CFC4", // Apricot Clay
-  "Lahaul & Spiti": "#D7DDEB", // Glacier Blue
-  Mandi: "#DCCFC3", // Cedar Wood
-  Kullu: "#EAD8DF", // Rhododendron Pink
-}; */
 
 const DISTRICT_GRADIENTS = {
   Chamba: ["#DCE8FA", "#BDD3F4", "#8FB4E6", "#5E8DC8"],
@@ -55,10 +39,35 @@ const DISTRICT_NAME_MAP = {
 const DEFAULT_FILTER =
   "brightness(1.06) drop-shadow(0 0 6px rgba(80,120,140,.25))";
 
-// const HOVER_FILTER = "brightness(1.08) saturate(1.10)";
-
 const SELECTED_FILTER =
   "brightness(1.12) saturate(1.15) drop-shadow(0 0 8px rgba(45,79,88,.25))";
+
+function StatCard({ label, value, icon: Icon, tone = "slate" }) {
+  const toneClasses = {
+    slate: "text-slate-700",
+    crimson: "text-[var(--pahadi-crimson)]",
+    amber: "text-amber-700",
+    emerald: "text-emerald-700",
+  };
+
+  return (
+    <div className="rounded-sm border border-[var(--him-stone)] bg-white p-3 shadow-xs">
+      <div className="flex items-center gap-2 mb-2">
+        {Icon && (
+          <div className="grid h-6 w-6 place-items-center rounded-xs border border-[var(--him-stone)] bg-[#F8FAFB]">
+            <Icon className="h-3.5 w-3.5 text-slate-600" aria-hidden="true" />
+          </div>
+        )}
+        <p className="text-[9px] font-black uppercase tracking-widest text-slate-600">
+          {label}
+        </p>
+      </div>
+      <p className={`text-base font-black ${toneClasses[tone]}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
 
 export default function HimachalVectorMap({
   selectedDistrict,
@@ -84,6 +93,15 @@ export default function HimachalVectorMap({
 
     return counts;
   }, [grievances]);
+
+  const stats = useMemo(() => {
+    return {
+      critical: filteredGrievances.filter((g) => g.priority === "critical").length,
+      high: filteredGrievances.filter((g) => g.priority === "high").length,
+      resolved: filteredGrievances.filter((g) => g.status === "resolved").length,
+      total: filteredGrievances.length,
+    };
+  }, [filteredGrievances]);
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -121,9 +139,7 @@ export default function HimachalVectorMap({
       district.style.strokeWidth = "1";
       district.style.cursor = "pointer";
       district.style.transition =
-        "fill .25s cubic-bezier(.4,0,.2,1), \
-stroke .25s cubic-bezier(.4,0,.2,1), \
-filter .25s cubic-bezier(.4,0,.2,1)";
+        "fill .25s cubic-bezier(.4,0,.2,1), stroke .25s cubic-bezier(.4,0,.2,1), filter .25s cubic-bezier(.4,0,.2,1)";
       district.style.filter = DEFAULT_FILTER;
     }
 
@@ -173,7 +189,7 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         ).length;
 
         const resolved = districtGrievances.filter(
-          (g) => g.status === "resolved",
+          (g) => g.status === "Verified Resolved",
         ).length;
 
         setTooltip({
@@ -271,70 +287,53 @@ filter .25s cubic-bezier(.4,0,.2,1)";
   }, [onSelectDistrict, selectedDistrict, districtCounts, grievances]);
 
   return (
-    /* 1. Transformed to a masonry wood-stone structure card */
-    <div className="kathkuni-card bg-white p-6 h-full flex flex-col">
-      <div className="flex items-start justify-between">
+    <div className="kathkuni-card bg-white p-6 h-full flex flex-col space-y-4">
+      {/* HEADER */}
+      <div className="flex items-start justify-between border-b border-[var(--him-stone)] pb-4">
         <div>
           <p className="text-[10px] font-black uppercase tracking-widest text-[var(--kinnaur-marigold)]">
-            GEOSPATIAL COMMAND DIVISION
+            Geospatial Command Division
           </p>
-
-          {/* Main Heading */}
-          <h2 className="mt-1 text-base font-black text-[var(--devdar-forest)] uppercase tracking-tight">
-            क्षेत्र निगरानी: GEOSPATIAL INCIDENT OVERVIEW
+          <h2 className="mt-1 text-sm font-black text-[var(--devdar-forest)] uppercase tracking-tight">
+            क्षेत्र निगरानी — District Incident Overview
           </h2>
         </div>
-
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--devdar-forest)] text-white shadow-sm">
-          <MapPin className="h-6 w-6" />
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-sm border border-[var(--him-stone)] bg-[#F8FAFB]">
+          <MapPin className="h-4 w-4 text-[var(--devdar-forest)]" aria-hidden="true" />
         </div>
       </div>
 
-      {/* 2. Traditional Weave Geometric Divider Strip Accent */}
-      <div className="mt-5 mb-5 border-t border-stone-200" />
-
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="rounded-lg border border-stone-200 bg-stone-50 py-3 px-4">
-          <p className="text-[10px] uppercase tracking-widest text-slate-500">
-            Districts
-          </p>
-          <h3 className="mt-2 text-xl font-black">
-            {selectedDistrict ? 1 : 12}
-          </h3>
-        </div>
-
-        <div className="rounded-lg border border-stone-200 bg-stone-50 py-3 px-4">
-          <p className="text-[10px] uppercase tracking-widest text-slate-500">
-            Reports
-          </p>
-          <h3 className="mt-2 text-xl font-black">
-            {filteredGrievances.length}
-          </h3>
-        </div>
-
-        <div className="rounded-lg border border-stone-200 bg-stone-50 py-3 px-4">
-          <p className="text-[10px] uppercase tracking-widest text-slate-500">
-            Critical
-          </p>
-          <h3 className="mt-2 text-xl font-black text-red-600">
-            {filteredGrievances.filter((g) => g.priority === "critical").length}
-          </h3>
-        </div>
-
-        <div className="rounded-lg border border-stone-200 bg-stone-50 py-3 px-4">
-          <p className="text-[10px] uppercase tracking-widest text-slate-500">
-            Selected
-          </p>
-          <h3 className="mt-2 text-lg font-bold">
-            {selectedDistrict || "All"}
-          </h3>
-        </div>
+      {/* TOP STATS: Districts, Reports, Critical, Resolved */}
+      <div className="grid gap-3 md:grid-cols-4">
+        <StatCard
+          label="Districts"
+          value={selectedDistrict ? 1 : 12}
+          icon={MapPin}
+        />
+        <StatCard
+          label="Reports"
+          value={stats.total}
+          icon={Activity}
+        />
+        <StatCard
+          label="Critical"
+          value={stats.critical}
+          tone="crimson"
+        />
+        <StatCard
+          label="Resolved"
+          value={stats.resolved}
+          tone="emerald"
+        />
       </div>
 
-      {/* 3. Alpine Framed Interactive Map Vector Viewport */}
+      {/* WOVEN DIVIDER */}
+      <div className="himachali-weave-divider" />
+
+      {/* MAP VIEWPORT */}
       <div
         ref={mapContainerRef}
-        className="relative h-[540px] w-full rounded-2xl border border-stone-200 bg-[#F8FAFC] overflow-hidden"
+        className="relative flex-1 min-h-[400px] rounded-sm border border-[var(--him-stone)] bg-[#F8FAFB] overflow-hidden"
       >
         <TransformWrapper
           ref={transformRef}
@@ -347,32 +346,36 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         >
           {({ zoomIn, zoomOut, resetTransform }) => (
             <>
-              <div className="absolute top-4 right-4 z-30 flex flex-col overflow-hidden rounded-xl border border-stone-200 bg-white/95 shadow-lg backdrop-blur-sm">
+              {/* ZOOM CONTROLS */}
+              <div className="absolute top-4 right-4 z-30 flex flex-col overflow-hidden rounded-sm border border-[var(--him-stone)] bg-white shadow-xs">
                 <button
                   onClick={() => zoomIn()}
-                  className="flex h-10 w-10 items-center justify-center border-b border-stone-200 transition hover:bg-stone-100"
+                  title="Zoom in"
+                  className="flex h-8 w-8 items-center justify-center border-b border-[var(--him-stone)] transition hover:bg-[#F8FAFB]"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-4 w-4 text-[var(--devdar-forest)]" aria-hidden="true" />
                 </button>
 
                 <button
                   onClick={() => zoomOut()}
-                  className="flex h-10 w-10 items-center justify-center border-b border-stone-200 transition hover:bg-stone-100"
+                  title="Zoom out"
+                  className="flex h-8 w-8 items-center justify-center border-b border-[var(--him-stone)] transition hover:bg-[#F8FAFB]"
                 >
-                  <Minus className="h-4 w-4" />
+                  <Minus className="h-4 w-4 text-[var(--devdar-forest)]" aria-hidden="true" />
                 </button>
 
                 <button
                   onClick={() => resetTransform()}
-                  className="flex h-10 w-10 items-center justify-center transition hover:bg-stone-100"
-                  title="Reset View"
+                  title="Reset view"
+                  className="flex h-8 w-8 items-center justify-center transition hover:bg-[#F8FAFB]"
                 >
-                  <RotateCcw className="h-4 w-4" />
+                  <RotateCcw className="h-4 w-4 text-[var(--devdar-forest)]" aria-hidden="true" />
                 </button>
               </div>
 
+              {/* MAP */}
               <TransformComponent
-                wrapperClass="!w-full !h-[455px]"
+                wrapperClass="!w-full !h-full"
                 contentClass="!w-full !h-full flex items-center justify-center"
               >
                 <HimachalDistricts className="district-map max-h-full max-w-full transition-all duration-300" />
@@ -381,18 +384,18 @@ filter .25s cubic-bezier(.4,0,.2,1)";
           )}
         </TransformWrapper>
 
+        {/* SELECTED DISTRICT BADGE */}
         {selectedDistrict && (
           <div className="absolute top-4 left-4 z-20">
-            <div className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md border border-stone-200 shadow-md px-3 py-2">
-              <MapPin className="h-4 w-4 text-[var(--devdar-forest)]" />
-
-              <span className="text-sm font-semibold text-[var(--devdar-forest)]">
+            <div className="flex items-center gap-2 rounded-sm border border-[var(--him-stone)] bg-white/95 shadow-xs backdrop-blur-sm px-3 py-2">
+              <MapPin className="h-4 w-4 shrink-0 text-[var(--devdar-forest)]" aria-hidden="true" />
+              <span className="text-xs font-bold text-[var(--devdar-forest)] whitespace-nowrap">
                 {selectedDistrict}
               </span>
-
               <button
                 onClick={() => onSelectDistrict?.(null)}
-                className="ml-1 flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 transition"
+                title="Clear selection"
+                className="ml-1 flex h-5 w-5 items-center justify-center rounded-xs text-slate-400 hover:bg-rose-100 hover:text-[var(--pahadi-crimson)] transition font-bold text-sm"
               >
                 ✕
               </button>
@@ -400,76 +403,72 @@ filter .25s cubic-bezier(.4,0,.2,1)";
           </div>
         )}
 
-        {/* 4. Traditional Floating HUD Filter Tab */}
-        <div
-          className="absolute bottom-0 left-0 right-0
-                border-t border-stone-200
-                bg-white/90 backdrop-blur-sm
-                px-8 py-4"
-        >
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-500">Low</span>
-
-            <div
-              className="flex-1 mx-2 h-1.5 rounded-full bg-gradient-to-r
-                  from-[#E5ECF7]
-via-[#A7BBD8]
-to-[#2D4F58]"
-            />
-
-            <span className="text-slate-400">High</span>
+        {/* BOTTOM LEGEND */}
+        <div className="absolute bottom-0 left-0 right-0 border-t border-[var(--him-stone)] bg-white/95 backdrop-blur-sm px-4 py-3 space-y-2">
+          <div className="grid gap-2 md:grid-cols-4">
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-xs" style={{ backgroundColor: "#E5ECF7" }} aria-hidden="true" />
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-600">Low</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-xs" style={{ backgroundColor: "#94B1DE" }} aria-hidden="true" />
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-600">Medium</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-xs" style={{ backgroundColor: "#5E8DC8" }} aria-hidden="true" />
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-600">High</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-xs" style={{ backgroundColor: "#2D4F58" }} aria-hidden="true" />
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-600">Critical</span>
+            </div>
           </div>
-
-          <p className="mt-2 text-[10px] leading-5 text-slate-500">
-            Darker shades indicate higher complaint density while preserving
-            each district's cultural color palette.
+          <p className="text-[9px] text-slate-500 font-medium">
+            Shading intensity shows incident density per district while maintaining cultural heritage palette.
           </p>
         </div>
 
+        {/* TOOLTIP */}
         {tooltip && (
           <div
-            className="absolute z-50 w-64 rounded-xl border border-stone-300
-               bg-white/95 backdrop-blur-sm shadow-2xl
-               px-4 py-3 pointer-events-none"
+            className="absolute z-50 w-64 rounded-sm border border-[var(--him-stone)] bg-white/95 backdrop-blur-sm shadow-xs pointer-events-none"
             style={{
               left: tooltip.x,
               top: tooltip.y,
               transform: "translate3d(0,0,0)",
             }}
           >
-            <div className="flex items-center gap-2 mb-3">
-              <MapPin className="h-4 w-4 text-[var(--devdar-forest)]" />
-              <h3 className="font-bold text-[15px] text-[var(--devdar-forest)]">
+            <div className="flex items-center gap-2 border-b border-[var(--him-stone)] px-3 py-2 mb-2">
+              <MapPin className="h-4 w-4 shrink-0 text-[var(--devdar-forest)]" aria-hidden="true" />
+              <h3 className="font-bold text-sm text-[var(--devdar-forest)]">
                 {tooltip.district}
               </h3>
             </div>
 
-            <div className="border-t border-stone-200 my-2" />
-
-            <div className="space-y-2 text-sm">
+            <div className="space-y-1.5 px-3 pb-3 text-[10px]">
               <div className="flex justify-between">
-                <span className="text-slate-500">Total Reports</span>
-                <span className="font-semibold">{tooltip.total}</span>
+                <span className="font-semibold text-slate-600">Total Reports</span>
+                <span className="font-black text-slate-900">{tooltip.total}</span>
               </div>
 
               <div className="flex justify-between">
-                <span className="text-red-600">Critical</span>
-                <span className="font-semibold">{tooltip.critical}</span>
+                <span className="font-semibold text-[var(--pahadi-crimson)]">Critical</span>
+                <span className="font-black text-[var(--pahadi-crimson)]">{tooltip.critical}</span>
               </div>
 
               <div className="flex justify-between">
-                <span className="text-amber-600">High</span>
-                <span className="font-semibold">{tooltip.high}</span>
+                <span className="font-semibold text-amber-700">High</span>
+                <span className="font-black text-amber-700">{tooltip.high}</span>
               </div>
 
               <div className="flex justify-between">
-                <span className="text-green-600">Resolved</span>
-                <span className="font-semibold">{tooltip.resolved}</span>
+                <span className="font-semibold text-emerald-700">Resolved</span>
+                <span className="font-black text-emerald-700">{tooltip.resolved}</span>
               </div>
-            </div>
 
-            <div className="border-t border-stone-200 mt-3 pt-2 text-xs text-slate-500">
-              Click to filter district →
+              <div className="border-t border-[var(--him-stone)] mt-2 pt-2 text-slate-500">
+                Click to filter →
+              </div>
             </div>
           </div>
         )}
