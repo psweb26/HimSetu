@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import IncidentTimeline from "../components/IncidentTimeline";
+import LifecycleTimeline from "../components/LifecycleTimeline";
 import {
   MapPin,
   FileText,
@@ -8,44 +9,84 @@ import {
   TriangleAlert,
   FileCheck2,
   Map,
+  Radio,
+  Zap,
+  ArrowBigUp,
+  Building2,
 } from "lucide-react";
 
-const getStatusClasses = (status) => {
-  switch (status) {
-    case "Active":
-      return "bg-red-50 text-red-700 border-red-100";
-
-    case "Warning":
-      return "bg-amber-50 text-amber-700 border-amber-100";
-
-    case "Forecast":
-      return "bg-blue-50 text-blue-700 border-blue-100";
-
-    case "Resolved":
-      return "bg-emerald-50 text-emerald-700 border-emerald-100";
-
-    default:
-      return "bg-slate-50 text-slate-700 border-slate-100";
-  }
-};
-
-function MetricCard({ icon, title, value }) {
+function TelemetryCard({ icon: Icon, label, value, tone }) {
   return (
-    <div
-      className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm transition-all duration-300 hover:-translate-y-1
-hover:border-slate-300
-hover:shadow-xl"
-    >
-      <div className="flex items-center gap-2 text-slate-500">
-        {icon}
-        <p className="text-[10px] uppercase tracking-[0.2em] font-semibold">
-          {title}
+    <div className="rounded-sm border border-[var(--him-stone)] bg-white p-3 shadow-xs">
+      <div className="flex items-center gap-2 mb-2">
+        <Icon className={`h-4 w-4 ${tone}`} aria-hidden="true" />
+        <p className="text-[9px] font-black uppercase tracking-widest text-slate-600">
+          {label}
         </p>
       </div>
-
-      <p className="mt-5 text-[22px] font-bold leading-tight text-slate-900">
+      <p className={`text-sm font-black ${tone}`}>
         {value}
       </p>
+    </div>
+  );
+}
+
+function PriorityBadge({ priority }) {
+  let bgColor = "bg-slate-100 text-slate-700 border-slate-200";
+  let icon = "◆";
+
+  if (priority === "critical") {
+    bgColor = "bg-[var(--pahadi-crimson)]/10 text-[var(--pahadi-crimson)] border-[var(--pahadi-crimson)]/30";
+    icon = "🔴";
+  } else if (priority === "high") {
+    bgColor = "bg-amber-100 text-amber-700 border-amber-300";
+    icon = "🟠";
+  } else if (priority === "medium") {
+    bgColor = "bg-blue-100 text-blue-700 border-blue-300";
+    icon = "🟡";
+  } else if (priority === "low") {
+    bgColor = "bg-emerald-100 text-emerald-700 border-emerald-300";
+    icon = "🟢";
+  }
+
+  const labelMap = {
+    critical: "Critical Threat",
+    high: "High Priority",
+    medium: "Medium Priority",
+    low: "Low Priority",
+  };
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-xs font-black uppercase tracking-wider ${bgColor}`}>
+      <span>{icon}</span>
+      {labelMap[priority] || priority}
+    </span>
+  );
+}
+
+function StatusBadge({ status }) {
+  let bgColor = "bg-slate-100 text-slate-700";
+
+  if (status === "Pending") {
+    bgColor = "bg-amber-100 text-amber-700";
+  } else if (status === "Under Verification") {
+    bgColor = "bg-blue-100 text-blue-700";
+  } else if (status === "Department Assigned") {
+    bgColor = "bg-sky-100 text-sky-700";
+  } else if (status === "Verified Resolved") {
+    bgColor = "bg-emerald-100 text-emerald-700";
+  } else if (status === "Reopened via Citizen Veto") {
+    bgColor = "bg-[var(--pahadi-crimson)]/10 text-[var(--pahadi-crimson)]";
+  }
+
+  const liveIndicator = status === "Pending" || status === "Under Verification";
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`inline-flex items-center gap-1.5 rounded-sm border border-current/20 px-2.5 py-1 text-xs font-bold uppercase tracking-wider ${bgColor}`}>
+        {liveIndicator && <Radio className="h-2.5 w-2.5 animate-pulse" aria-hidden="true" />}
+        {status}
+      </span>
     </div>
   );
 }
@@ -79,193 +120,128 @@ export default function IncidentPage() {
   }, [id]);
 
   if (error) {
-    return <div className="p-10 text-center text-red-600">{error}</div>;
+    return (
+      <div className="p-10 text-center">
+        <div className="inline-flex items-start gap-3 rounded-sm border border-[var(--pahadi-crimson)]/30 bg-rose-50 p-4">
+          <TriangleAlert className="h-5 w-5 shrink-0 text-[var(--pahadi-crimson)] mt-0.5" aria-hidden="true" />
+          <p className="text-sm font-semibold text-[var(--pahadi-crimson)]">{error}</p>
+        </div>
+      </div>
+    );
   }
 
   if (!data) {
     return (
-      <div className="p-10 text-center text-slate-500">Loading Incident...</div>
+      <div className="p-10 text-center">
+        <p className="text-sm font-semibold text-slate-500">Loading Incident...</p>
+      </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-12 px-6 space-y-10">
-      {/* Executive Header */}
-      <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-white to-slate-50 shadow-md p-7">
-        <div className="flex justify-between items-start">
-          <div>
-            <div className="flex items-center gap-4">
-              <h1 className="text-4xl font-bold tracking-tight text-slate-900">
-                {data.asset.name}
-              </h1>
-
-              <span
-                className={`inline-flex items-center rounded-full border px-5 py-2 text-sm font-semibold ${getStatusClasses(
-                  data.incident.current_state,
-                )}`}
-              >
-                {data.incident.current_state}
+    <div className="max-w-7xl mx-auto py-6 px-4 space-y-6">
+      {/* COMMAND PANEL HEADER */}
+      <div className="kathkuni-card bg-white p-6 space-y-4">
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--him-stone)] pb-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className="text-[9px] font-black uppercase tracking-widest text-[var(--kinnaur-marigold)] bg-amber-100 px-2 py-1 rounded-xs">
+                Live Telemetry
+              </span>
+              <span className="text-[9px] font-bold uppercase tracking-wide text-slate-500">
+                Incident Command Console
               </span>
             </div>
-
-            <p className="mt-3 text-lg text-slate-500">
+            <h1 className="text-xl font-black text-[var(--devdar-forest)] uppercase tracking-tight">
+              {data.asset.name}
+            </h1>
+            <p className="mt-1 text-xs text-slate-600">
               {data.asset.asset_type} • {data.asset.district} District
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={openMap}
-            title="GIS map integration coming soon"
-            className="
-group
-inline-flex
-items-center
-gap-2
-rounded-xl
-border
-border-slate-300
-bg-white
-px-5
-py-3
-text-sm
-font-medium
-text-slate-700
-shadow-sm
-transition-all
-duration-300
-hover:bg-slate-50
-hover:shadow-md
-"
-          >
-            <Map
-              size={18}
-              className="transition-transform duration-300 group-hover:rotate-6"
-            />
-            View on Map
-          </button>
+          <div className="flex flex-col gap-2 items-end">
+            <PriorityBadge priority={data.incident.priority || "medium"} />
+            <StatusBadge status={data.incident.current_state} />
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mt-7 pt-6 border-t border-slate-200">
-          <MetricCard
-            icon={<TriangleAlert size={18} className="text-red-500" />}
-            title="Incident Type"
-            value={
-              <div className="space-y-2">
-                <div className="text-xl font-bold">
-                  {data.incident.event_type}
-                </div>
-
-                <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1">
-                  <span className="h-2 w-2 rounded-full bg-red-500"></span>
-
-                  <span className="text-sm font-medium text-red-700">
-                    High Priority
-                  </span>
-                </div>
-              </div>
-            }
+        {/* TOP: INCIDENT ID, PRIORITY, STATUS, LIVE INDICATOR */}
+        <div className="grid gap-3 md:grid-cols-4">
+          <TelemetryCard
+            icon={FileText}
+            label="Incident ID"
+            value={data.incident.id || "N/A"}
+            tone="text-[var(--devdar-forest)]"
           />
-
-          <MetricCard
-            icon={<FileText size={18} className="text-indigo-500" />}
-            title="Evidence Records"
-            value={
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50">
-                  <FileCheck2 size={18} className="text-indigo-600" />
-                </div>
-
-                <div>
-                  <p className="text-2xl font-bold leading-none text-slate-900">
-                    {data.summary.evidence_count}
-                  </p>
-
-                  <p className="mt-1 text-sm text-slate-500">
-                    Verified Reports
-                  </p>
-                </div>
-              </div>
-            }
+          <TelemetryCard
+            icon={MapPin}
+            label="District / Block"
+            value={`${data.asset.district}`}
+            tone="text-[var(--devdar-forest)]"
           />
-
-          <MetricCard
-            icon={<Clock3 size={18} className="text-amber-500" />}
-            title="Last Updated"
-            value={
-              <div className="leading-tight">
-                <div>
-                  {`${new Date(data.summary.last_updated).toLocaleDateString(
-                    "en-IN",
-                    {
-                      day: "numeric",
-                      month: "short",
-                    },
-                  )} '${String(
-                    new Date(data.summary.last_updated).getFullYear(),
-                  ).slice(-2)}`}
-                </div>
-
-                <div className="mt-1 text-base font-semibold text-slate-600">
-                  {new Date(data.summary.last_updated).toLocaleTimeString(
-                    "en-IN",
-                    {
-                      hour: "numeric",
-                      minute: "2-digit",
-                      hour12: true,
-                    },
-                  )}
-                </div>
-              </div>
-            }
+          <TelemetryCard
+            icon={Zap}
+            label="Infrastructure"
+            value={data.asset.asset_type || "N/A"}
+            tone="text-amber-700"
           />
-
-          <MetricCard
-            icon={<MapPin size={18} className="text-emerald-500" />}
-            title="Coordinates"
-            value={
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wider text-slate-500">
-                    Lat
-                  </span>
-
-                  <span className="font-semibold text-slate-900">
-                    {data.asset.lat.toFixed(3)}° N
-                  </span>
-                </div>
-
-                <div className="h-px bg-slate-100" />
-
-                <div className="flex items-center justify-between">
-                  <span className="text-xs uppercase tracking-wider text-slate-500">
-                    Lon
-                  </span>
-
-                  <span className="font-semibold text-slate-900">
-                    {data.asset.lon.toFixed(3)}° E
-                  </span>
-                </div>
-              </div>
-            }
+          <TelemetryCard
+            icon={Clock3}
+            label="Created"
+            value={data.summary?.created_date ? new Date(data.summary.created_date).toLocaleDateString("en-IN") : "N/A"}
+            tone="text-slate-700"
           />
         </div>
       </div>
 
-      {/* Incident Narrative */}
-      <section className="rounded-3xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 shadow-xl overflow-hidden">
-        <div className="px-8 py-7 border-b border-slate-200 bg-gradient-to-r from-slate-100 via-white to-slate-50">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-            {data.incident.event_type}
+      {/* LIFECYCLE PROGRESS TIMELINE */}
+      <LifecycleTimeline status={data.incident.current_state} />
+
+      {/* BOTTOM TELEMETRY METRICS */}
+      <div className="grid gap-4 lg:grid-cols-4">
+        <TelemetryCard
+          icon={Radio}
+          label="SLA Status"
+          value={data.summary?.sla_status || "On Track"}
+          tone="text-emerald-700"
+        />
+        <TelemetryCard
+          icon={ArrowBigUp}
+          label="Community Upvotes"
+          value={data.summary?.upvotes || "0"}
+          tone="text-[var(--kinnaur-marigold)]"
+        />
+        <TelemetryCard
+          icon={Building2}
+          label="Assigned Department"
+          value={data.incident.department || "Pending"}
+          tone="text-sky-700"
+        />
+        <TelemetryCard
+          icon={FileCheck2}
+          label="Evidence Records"
+          value={data.summary?.evidence_count || "0"}
+          tone="text-indigo-700"
+        />
+      </div>
+
+      {/* TIMELINE & EVIDENCE SECTION */}
+      <section className="kathkuni-card bg-white p-6">
+        <div className="border-b border-[var(--him-stone)] pb-4 mb-6">
+          <div className="flex items-baseline gap-2 mb-2">
+            <span className="text-[9px] font-black uppercase tracking-widest text-[var(--kinnaur-marigold)]">
+              Operational Audit Trail
+            </span>
+          </div>
+          <h2 className="text-base font-black text-[var(--devdar-forest)] uppercase tracking-tight">
+            Incident Timeline & Evidence
           </h2>
-          <p className="mt-2 max-w-2xl text-[15px] leading-7 text-slate-500">
-            Operational timeline, audit history and supporting evidence.
+          <p className="mt-1 text-xs text-slate-600">
+            Chronological progression and supporting documentation.
           </p>
         </div>
 
-        <div className="p-8">
-          <IncidentTimeline data={data} />
-        </div>
+        <IncidentTimeline data={data} />
       </section>
     </div>
   );
