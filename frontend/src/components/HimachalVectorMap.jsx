@@ -125,8 +125,10 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         "brightness(1.06) drop-shadow(0 0 6px rgba(80,120,140,.25))";
 
       district.addEventListener("mouseenter", () => {
-        district.style.filter = "brightness(1.08) saturate(1.08)";
-        district.style.stroke = "#365C68";
+        if (selectedDistrict) return;
+
+  district.style.filter = "brightness(1.08) saturate(1.08)";
+  district.style.stroke = "#365C68";
 
         const districtGrievances = grievances.filter(
           (g) => g.district === districtName,
@@ -208,6 +210,7 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         district.style.strokeWidth = "2";
         district.style.filter = SELECTED_FILTER;
 
+        setTooltip(null);
         onSelectDistrict?.(clickedDistrict);
       });
 
@@ -222,10 +225,13 @@ filter .25s cubic-bezier(.4,0,.2,1)";
           district.style.strokeWidth = "1";
         }
 
-        setTooltip(null);
+        if (!selectedDistrict) {
+  setTooltip(null);
+}
       });
 
       district.addEventListener("mousemove", (e) => {
+        if (selectedDistrict) return;
         const rect = mapContainerRef.current.getBoundingClientRect();
 
         const TOOLTIP_WIDTH = 270;
@@ -330,6 +336,25 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         >
           <HimachalDistricts className="max-h-full max-w-full transition-all duration-300" />
         </div>
+
+        {selectedDistrict && (
+          <div className="absolute top-4 left-4 z-20">
+            <div className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md border border-stone-200 shadow-md px-3 py-2">
+              <MapPin className="h-4 w-4 text-[var(--devdar-forest)]" />
+
+              <span className="text-sm font-semibold text-[var(--devdar-forest)]">
+                {selectedDistrict}
+              </span>
+
+              <button
+                onClick={() => onSelectDistrict?.(null)}
+                className="ml-1 flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-500 transition"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 4. Traditional Floating HUD Filter Tab */}
         <div
