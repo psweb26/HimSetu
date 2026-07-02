@@ -66,6 +66,7 @@ export default function HimachalVectorMap({
   grievances = [],
 }) {
   const mapContainerRef = useRef(null);
+  const transformRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
 
   const filteredGrievances = useMemo(() => {
@@ -88,14 +89,16 @@ export default function HimachalVectorMap({
     if (!mapContainerRef.current) return;
 
     const svg = mapContainerRef.current.querySelector(".district-map");
-    const districts = svg.querySelectorAll("path[id]");
+    if (!svg) return;
 
-    let activeDistrict = null;
-    districts.forEach((district) => {
-      const districtName = DISTRICT_NAME_MAP[district.id] || district.id;
+    const districts = Array.from(svg.querySelectorAll("path[id]"));
 
+    function getDistrictName(district) {
+      return DISTRICT_NAME_MAP[district.id] || district.id;
+    }
+
+    function getFillColor(districtName) {
       const count = districtCounts[districtName] || 0;
-
       const shades = DISTRICT_GRADIENTS[districtName] ?? [
         "#EEEEEE",
         "#DDDDDD",
@@ -103,28 +106,53 @@ export default function HimachalVectorMap({
         "#BBBBBB",
       ];
 
-      const fillColor =
-        count <= 2
-          ? shades[0]
-          : count <= 4
-            ? shades[1]
-            : count <= 6
-              ? shades[2]
-              : shades[3];
+      return count <= 2
+        ? shades[0]
+        : count <= 4
+          ? shades[1]
+          : count <= 6
+            ? shades[2]
+            : shades[3];
+    }
 
-      district.style.fill = fillColor;
-
+    function applyBaseStyle(district, districtName) {
+      district.style.fill = getFillColor(districtName);
       district.style.stroke = "#718096";
       district.style.strokeWidth = "1";
-
       district.style.cursor = "pointer";
       district.style.transition =
         "fill .25s cubic-bezier(.4,0,.2,1), \
 stroke .25s cubic-bezier(.4,0,.2,1), \
 filter .25s cubic-bezier(.4,0,.2,1)";
+      district.style.filter = DEFAULT_FILTER;
+    }
 
-      district.style.filter =
-        "brightness(1.06) drop-shadow(0 0 6px rgba(80,120,140,.25))";
+    function applySelectedStyle(district, districtName) {
+      const selectedShades = DISTRICT_GRADIENTS[districtName] ?? [
+        "#EEEEEE",
+        "#DDDDDD",
+        "#CCCCCC",
+        "#BBBBBB",
+      ];
+
+      district.style.fill = selectedShades[3];
+      district.style.stroke = "#2D4F58";
+      district.style.strokeWidth = "2";
+      district.style.filter = SELECTED_FILTER;
+    }
+
+    let activeDistrict = null;
+
+    districts.forEach((district) => {
+      const districtName = getDistrictName(district);
+      const isSelected = selectedDistrict === districtName;
+
+      applyBaseStyle(district, districtName);
+
+      if (isSelected) {
+        activeDistrict = district;
+        applySelectedStyle(district, districtName);
+      }
 
       district.addEventListener("mouseenter", () => {
         if (selectedDistrict) return;
@@ -160,36 +188,11 @@ filter .25s cubic-bezier(.4,0,.2,1)";
       });
 
       district.addEventListener("click", () => {
-        const clickedDistrict = DISTRICT_NAME_MAP[district.id] || district.id;
-
+        const clickedDistrict = getDistrictName(district);
         const isDeselecting = selectedDistrict === clickedDistrict;
 
         if (activeDistrict) {
-          const previousName =
-            DISTRICT_NAME_MAP[activeDistrict.id] || activeDistrict.id;
-
-          const previousCount = districtCounts[previousName] || 0;
-
-          const previousShades = DISTRICT_GRADIENTS[previousName] ?? [
-            "#EEEEEE",
-            "#DDDDDD",
-            "#CCCCCC",
-            "#BBBBBB",
-          ];
-
-          const previousFill =
-            previousCount <= 2
-              ? previousShades[0]
-              : previousCount <= 4
-                ? previousShades[1]
-                : previousCount <= 6
-                  ? previousShades[2]
-                  : previousShades[3];
-
-          activeDistrict.style.fill = previousFill;
-          activeDistrict.style.stroke = "#718096";
-          activeDistrict.style.strokeWidth = "1";
-          activeDistrict.style.filter = DEFAULT_FILTER;
+          applyBaseStyle(activeDistrict, getDistrictName(activeDistrict));
         }
 
         if (isDeselecting) {
@@ -199,18 +202,7 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         }
 
         activeDistrict = district;
-
-        const clickedShades = DISTRICT_GRADIENTS[clickedDistrict] ?? [
-          "#EEEEEE",
-          "#DDDDDD",
-          "#CCCCCC",
-          "#BBBBBB",
-        ];
-
-        district.style.fill = clickedShades[3];
-        district.style.stroke = "#2D4F58";
-        district.style.strokeWidth = "2";
-        district.style.filter = SELECTED_FILTER;
+        applySelectedStyle(district, clickedDistrict);
 
         setTooltip(null);
         onSelectDistrict?.(clickedDistrict);
@@ -218,9 +210,7 @@ filter .25s cubic-bezier(.4,0,.2,1)";
 
       district.addEventListener("mouseleave", () => {
         if (district === activeDistrict) {
-          district.style.filter = SELECTED_FILTER;
-          district.style.stroke = "#2D4F58";
-          district.style.strokeWidth = "2";
+          applySelectedStyle(district, getDistrictName(district));
         } else {
           district.style.filter = DEFAULT_FILTER;
           district.style.stroke = "#718096";
@@ -261,7 +251,18 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         }));
       });
     });
+
+    const zoomFrame = window.requestAnimationFrame(() => {
+      if (activeDistrict && selectedDistrict) {
+        transformRef.current?.zoomToElement(activeDistrict, 2.25, 500);
+        return;
+      }
+
+      transformRef.current?.resetTransform(300);
+    });
+
     return () => {
+      window.cancelAnimationFrame(zoomFrame);
       districts.forEach((district) => {
         const clone = district.cloneNode(true);
         district.replaceWith(clone);
@@ -336,6 +337,7 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         className="relative h-[540px] w-full rounded-2xl border border-stone-200 bg-[#F8FAFC] overflow-hidden"
       >
         <TransformWrapper
+          ref={transformRef}
           initialScale={1}
           minScale={1}
           maxScale={5}
