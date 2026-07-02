@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapPin } from "lucide-react";
+import { Plus, Minus, RotateCcw, MapPin } from "lucide-react";
+
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 // SVG coordinate boundaries for active regions
 import HimachalDistricts from "../assets/himachal_districts.svg?react";
@@ -127,8 +129,8 @@ filter .25s cubic-bezier(.4,0,.2,1)";
       district.addEventListener("mouseenter", () => {
         if (selectedDistrict) return;
 
-  district.style.filter = "brightness(1.08) saturate(1.08)";
-  district.style.stroke = "#365C68";
+        district.style.filter = "brightness(1.08) saturate(1.08)";
+        district.style.stroke = "#365C68";
 
         const districtGrievances = grievances.filter(
           (g) => g.district === districtName,
@@ -226,8 +228,8 @@ filter .25s cubic-bezier(.4,0,.2,1)";
         }
 
         if (!selectedDistrict) {
-  setTooltip(null);
-}
+          setTooltip(null);
+        }
       });
 
       district.addEventListener("mousemove", (e) => {
@@ -330,12 +332,49 @@ filter .25s cubic-bezier(.4,0,.2,1)";
 
       {/* 3. Alpine Framed Interactive Map Vector Viewport */}
       <div className="relative h-[540px] rounded-2xl border border-stone-200 bg-[#F8FAFC] overflow-hidden">
-        <div
-          ref={mapContainerRef}
-          className="flex h-[485px] w-full items-center justify-center p-6"
+        <TransformWrapper
+          initialScale={1}
+          minScale={1}
+          maxScale={5}
+          wheel={{ step: 0.15 }}
+          doubleClick={{ disabled: false }}
+          panning={{ velocityDisabled: true }}
         >
-          <HimachalDistricts className="max-h-full max-w-full transition-all duration-300" />
-        </div>
+          {({ zoomIn, zoomOut, resetTransform }) => (
+            <>
+              <div className="absolute top-4 right-4 z-30 flex flex-col overflow-hidden rounded-xl border border-stone-200 bg-white/95 shadow-lg backdrop-blur-sm">
+                <button
+                  onClick={() => zoomIn()}
+                  className="flex h-10 w-10 items-center justify-center border-b border-stone-200 transition hover:bg-stone-100"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+
+                <button
+                  onClick={() => zoomOut()}
+                  className="flex h-10 w-10 items-center justify-center border-b border-stone-200 transition hover:bg-stone-100"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+
+                <button
+                  onClick={() => resetTransform()}
+                  className="flex h-10 w-10 items-center justify-center transition hover:bg-stone-100"
+                  title="Reset View"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+              </div>
+
+              <TransformComponent
+                wrapperClass="!w-full !h-full"
+                contentClass="!w-full !h-full flex items-center justify-center"
+              >
+                <HimachalDistricts className="max-h-full max-w-full transition-all duration-300" />
+              </TransformComponent>
+            </>
+          )}
+        </TransformWrapper>
 
         {selectedDistrict && (
           <div className="absolute top-4 left-4 z-20">
