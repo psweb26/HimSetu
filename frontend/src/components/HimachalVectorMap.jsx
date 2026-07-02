@@ -50,6 +50,14 @@ const DISTRICT_NAME_MAP = {
   Kinnaur: "Kinnaur",
 };
 
+const DEFAULT_FILTER =
+  "brightness(1.06) drop-shadow(0 0 6px rgba(80,120,140,.25))";
+
+// const HOVER_FILTER = "brightness(1.08) saturate(1.10)";
+
+const SELECTED_FILTER =
+  "brightness(1.12) saturate(1.15) drop-shadow(0 0 8px rgba(45,79,88,.25))";
+
 export default function HimachalVectorMap({
   selectedDistrict,
   onSelectDistrict,
@@ -109,42 +117,56 @@ export default function HimachalVectorMap({
 
       district.style.cursor = "pointer";
       district.style.transition =
-        "fill .25s ease, stroke .25s ease, filter .25s ease";
+        "fill .25s cubic-bezier(.4,0,.2,1), \
+stroke .25s cubic-bezier(.4,0,.2,1), \
+filter .25s cubic-bezier(.4,0,.2,1)";
 
       district.style.filter =
         "brightness(1.06) drop-shadow(0 0 6px rgba(80,120,140,.25))";
 
-      district.addEventListener("mouseenter", (e) => {
-        district.style.filter = "brightness(1.12) saturate(1.12)";
+      district.addEventListener("mouseenter", () => {
+        district.style.filter = "brightness(1.08) saturate(1.08)";
         district.style.stroke = "#365C68";
 
         const districtGrievances = grievances.filter(
           (g) => g.district === districtName,
         );
 
-        const rect = mapContainerRef.current.getBoundingClientRect();
+        const critical = districtGrievances.filter(
+          (g) => g.priority === "critical",
+        ).length;
+
+        const high = districtGrievances.filter(
+          (g) => g.priority === "high",
+        ).length;
+
+        const resolved = districtGrievances.filter(
+          (g) => g.status === "resolved",
+        ).length;
 
         setTooltip({
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
           district: districtName,
           total: districtGrievances.length,
-          critical: districtGrievances.filter((g) => g.priority === "critical")
-            .length,
-          high: districtGrievances.filter((g) => g.priority === "high").length,
-          resolved: districtGrievances.filter((g) => g.status === "resolved")
-            .length,
+          critical,
+          high,
+          resolved,
+          x: 0,
+          y: 0,
         });
       });
 
       district.addEventListener("click", () => {
+        const clickedDistrict = DISTRICT_NAME_MAP[district.id] || district.id;
+
+        const isDeselecting = selectedDistrict === clickedDistrict;
+
         if (activeDistrict) {
-          const previousDistrictName =
+          const previousName =
             DISTRICT_NAME_MAP[activeDistrict.id] || activeDistrict.id;
 
-          const previousCount = districtCounts[previousDistrictName] || 0;
+          const previousCount = districtCounts[previousName] || 0;
 
-          const previousShades = DISTRICT_GRADIENTS[previousDistrictName] ?? [
+          const previousShades = DISTRICT_GRADIENTS[previousName] ?? [
             "#EEEEEE",
             "#DDDDDD",
             "#CCCCCC",
@@ -161,18 +183,19 @@ export default function HimachalVectorMap({
                   : previousShades[3];
 
           activeDistrict.style.fill = previousFill;
-
           activeDistrict.style.stroke = "#718096";
           activeDistrict.style.strokeWidth = "1";
-          district.style.filter =
-            "brightness(1.1) saturate(1.18) drop-shadow(0 0 8px rgba(45,79,88,.25))";
+          activeDistrict.style.filter = DEFAULT_FILTER;
+        }
+
+        if (isDeselecting) {
+          activeDistrict = null;
+          onSelectDistrict?.(null);
+          return;
         }
 
         activeDistrict = district;
 
-        const clickedDistrict = DISTRICT_NAME_MAP[district.id] || district.id;
-
-        // Apply the darkest shade from this district's palette
         const clickedShades = DISTRICT_GRADIENTS[clickedDistrict] ?? [
           "#EEEEEE",
           "#DDDDDD",
@@ -183,21 +206,22 @@ export default function HimachalVectorMap({
         district.style.fill = clickedShades[3];
         district.style.stroke = "#2D4F58";
         district.style.strokeWidth = "2";
-        district.style.filter = "brightness(1.12) saturate(1.12)";
+        district.style.filter = SELECTED_FILTER;
 
-        if (selectedDistrict === clickedDistrict) {
-          onSelectDistrict?.(null);
-        } else {
-          onSelectDistrict?.(clickedDistrict);
-        }
+        onSelectDistrict?.(clickedDistrict);
       });
 
       district.addEventListener("mouseleave", () => {
-        district.style.filter = "brightness(1) saturate(1)";
-
-        if (district !== activeDistrict) {
+        if (district === activeDistrict) {
+          district.style.filter = SELECTED_FILTER;
+          district.style.stroke = "#2D4F58";
+          district.style.strokeWidth = "2";
+        } else {
+          district.style.filter = DEFAULT_FILTER;
           district.style.stroke = "#718096";
+          district.style.strokeWidth = "1";
         }
+
         setTooltip(null);
       });
 
@@ -248,7 +272,7 @@ export default function HimachalVectorMap({
 
           {/* Main Heading */}
           <h2 className="mt-1 text-base font-black text-[var(--devdar-forest)] uppercase tracking-tight">
-            क्षेत्र निगरानी: GEOSPATIAL INCIDENT LEDGER
+            क्षेत्र निगरानी: GEOSPATIAL INCIDENT OVERVIEW
           </h2>
         </div>
 
