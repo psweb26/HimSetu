@@ -9,9 +9,9 @@ const PrintableEvidenceReport = forwardRef(
   ({ selectedEvidence, data }, ref) => {
     if (!selectedEvidence) return null;
 
-    const reportId = `HS-${selectedEvidence.created_at
-      ?.slice(0, 10)
-      .replace(/-/g, "")}-${String(data.incident.id).padStart(4, "0")}`;
+    const reportId = data.incident.ticket_id
+      ? `${data.incident.ticket_id}-EVIDENCE`
+      : `HS-${selectedEvidence.created_at?.slice(0, 10).replace(/-/g, "")}`;
 
     return (
       <div
@@ -92,7 +92,7 @@ const PrintableEvidenceReport = forwardRef(
                     <p className="text-[10px] font-bold text-slate-500">Figure 1</p>
                 </div>
                 <h3 className="font-bold text-slate-900 mb-3 text-sm">Evidence Photo</h3>
-                <img src={dummyEvidence} className="w-full h-40 object-cover rounded-lg border" alt="Evidence" />
+                <img src={data.incident.primary_image_url || selectedEvidence.image_url || dummyEvidence} className="w-full h-40 object-cover rounded-lg border" alt="Evidence" />
                 <p className="text-sm font-bold text-slate-900 mt-3">Figure 1. {data.incident.event_type}</p>
                 <p className="text-[11px] text-slate-500 mt-1">Photographic evidence of the reported {data.incident.event_type.toLowerCase()} near {data.asset.name}.</p>
              </div>

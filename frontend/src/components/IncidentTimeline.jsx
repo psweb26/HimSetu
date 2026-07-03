@@ -7,6 +7,18 @@ import reportImg from "../assets/report_img.png";
 
 const getStatusColor = (status) => {
   switch (status) {
+    case "Pending":
+      return "bg-amber-100 text-amber-700";
+
+    case "Under Verification":
+      return "bg-blue-100 text-blue-700";
+
+    case "Verified Resolved":
+      return "bg-emerald-100 text-emerald-700";
+
+    case "Reopened via Citizen Veto":
+      return "bg-red-100 text-red-700";
+
     case "Active":
       return "bg-red-100 text-red-700";
 
@@ -26,6 +38,18 @@ const getStatusColor = (status) => {
 
 const getTimelineDotColor = (state) => {
   switch (state) {
+    case "Pending":
+      return "bg-amber-500";
+
+    case "Under Verification":
+      return "bg-blue-500";
+
+    case "Verified Resolved":
+      return "bg-emerald-500";
+
+    case "Reopened via Citizen Veto":
+      return "bg-red-500";
+
     case "Active":
       return "bg-red-500";
 
@@ -164,8 +188,16 @@ export default function IncidentTimeline({ data }) {
                 key={`${ev.created_at}-${ev.source}`}
                 className="group rounded-2xl border border-slate-200 bg-white p-6 transition-all duration-300 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-lg"
               >
-                <div className="flex items-start justify-between">
-                  <div>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex gap-4">
+                    {ev.image_url && (
+                      <img
+                        src={ev.image_url}
+                        alt=""
+                        className="h-24 w-32 shrink-0 rounded-xl border border-slate-200 object-cover"
+                      />
+                    )}
+                    <div>
                     <h4 className="text-xl font-semibold text-slate-900">
                       {ev.source}
                     </h4>
@@ -173,6 +205,10 @@ export default function IncidentTimeline({ data }) {
                     <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
                       Evidence Source
                     </p>
+                    <p className="mt-2 text-xs font-semibold text-slate-500">
+                      Uploaded by {ev.uploaded_by || "Unknown"} • {ev.verification_status || "Pending Verification"}
+                    </p>
+                    </div>
                   </div>
 
                   <button
@@ -184,7 +220,7 @@ export default function IncidentTimeline({ data }) {
                   </button>
                 </div>
 
-                <p className="mt-5 leading-7 text-slate-700">{ev.summary}</p>
+                <p className="mt-5 leading-7 text-slate-700">{ev.description || ev.summary}</p>
 
                 <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4">
                   <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold uppercase text-indigo-700">
@@ -245,12 +281,7 @@ export default function IncidentTimeline({ data }) {
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => {
-                    const reportId = `HS-${selectedEvidence.created_at
-                      ?.slice(0, 10)
-                      .replace(
-                        /-/g,
-                        "",
-                      )}-${String(data.incident.id).padStart(4, "0")}`;
+                    const reportId = `${data.incident.ticket_id || data.incident.id}-EVIDENCE`;
 
                     downloadEvidencePDF(reportRef, reportId);
                   }}
@@ -356,12 +387,7 @@ export default function IncidentTimeline({ data }) {
                   </p>
 
                   <p className="mt-1 font-mono text-xs text-slate-700">
-                    {`HS-${selectedEvidence.created_at
-                      ?.slice(0, 10)
-                      .replace(
-                        /-/g,
-                        "",
-                      )}-${String(data.incident.id).padStart(4, "0")}`}
+                    {`${data.incident.ticket_id || data.incident.id}-EVIDENCE`}
                   </p>
                 </div>
               </div>
@@ -383,6 +409,19 @@ export default function IncidentTimeline({ data }) {
                   </p>
                 </div>
               </div>
+
+              {selectedEvidence.image_url && (
+                <div className="relative z-10">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    Evidence Photograph
+                  </p>
+                  <img
+                    src={selectedEvidence.image_url}
+                    alt=""
+                    className="mt-3 max-h-72 w-full rounded-xl border border-slate-200 object-cover"
+                  />
+                </div>
+              )}
 
               {/* Recorded On */}
 

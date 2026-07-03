@@ -1,17 +1,20 @@
 import os
 import re
+import shutil
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from schemas import ManualInjectRequest
 from ledger import process_evidence
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from fastapi import Depends, FastAPI, Form, HTTPException, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -59,6 +62,8 @@ MONSOON_COMMAND_STATE = os.getenv("MONSOON_COMMAND_STATE", "ACTIVE")
 UPVOTE_CRITICAL_THRESHOLD = 30
 ACTIVE_STATUSES = ("Pending", "Under Verification", "In Progress", "Reopened via Citizen Veto")
 SLA_MONITOR_INTERVAL_SECONDS = 60
+UPLOAD_ROOT = Path(os.getenv("UPLOAD_ROOT", Path(__file__).resolve().parent / "uploads"))
+UPLOAD_PUBLIC_PREFIX = "/uploads"
 
 sla_monitor_thread: Optional[threading.Thread] = None
 ingestion_scheduler: Optional[BackgroundScheduler] = None
@@ -93,6 +98,9 @@ app.add_middleware(
         "X-Requested-With",
     ],
 )
+
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount(UPLOAD_PUBLIC_PREFIX, StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 def to_iso(dt):
     return dt.isoformat() + "Z" if dt else None
@@ -157,18 +165,13 @@ def get_asset(asset_id: int, db: Session = Depends(get_db)):
         "lon": asset.lon
     }
 
-@app.get("/api/incidents/{incident_id}")
+@app.get("/api/incidents/{incident_ref}")
 def get_incident(
-    incident_id: int,
+    incident_ref: str,
     db: Session = Depends(get_db)
 ):
     """Fetch complete Incident narrative, evidence trail and audit history."""
-
-    incident = (
-        db.query(Incident)
-        .filter(Incident.id == incident_id)
-        .first()
-    )
+    incident = resolve_incident_by_ref(db, incident_ref)
 
     if not incident:
         raise HTTPException(
@@ -180,7 +183,7 @@ def get_incident(
     if not asset:
         raise HTTPException(
             status_code=500, 
-            detail=f"Data Integrity Error: Asset {incident.asset_id} for incident {incident_id} not found."
+            detail=f"Data Integrity Error: Asset {incident.asset_id} for incident {incident.id} not found."
         )
     
     transitions = (
@@ -199,6 +202,44 @@ def get_incident(
     .order_by(Evidence.created_at.desc())
     .all()
     )
+    grievance = get_primary_grievance_for_incident(db, incident.id)
+    evidence_count = len(evidence_list)
+    image_evidence = [
+        evidence
+        for evidence in evidence_list
+        if evidence.image_url or (evidence.payload or {}).get("image_url")
+    ]
+    image_evidence.sort(
+        key=lambda evidence: (
+            int((evidence.payload or {}).get("upload_order") or 9999),
+            evidence.created_at or utc_now(),
+        )
+    )
+    primary_image_url = (
+        grievance.intake_photo_url
+        if grievance and grievance.intake_photo_url
+        else (
+            image_evidence[0].image_url or (image_evidence[0].payload or {}).get("image_url")
+            if image_evidence
+            else None
+        )
+    )
+    gallery_images = [
+        {
+            "id": evidence.id,
+            "image_url": evidence.image_url or (evidence.payload or {}).get("image_url"),
+            "description": evidence.description or evidence.summary,
+            "is_primary": (
+                (evidence.image_url or (evidence.payload or {}).get("image_url"))
+                == primary_image_url
+            ),
+            "upload_order": int((evidence.payload or {}).get("upload_order") or index + 1),
+        }
+        for index, evidence in enumerate(image_evidence)
+    ]
+    sla_status = "On Track"
+    if grievance and grievance.sla_due_date and enum_value(grievance.status) in ACTIVE_STATUSES:
+        sla_status = "Breached" if grievance.sla_due_date < utc_now() else "On Track"
 
     return {
     "asset": {
@@ -212,17 +253,39 @@ def get_incident(
 
     "incident": {
         "id": incident.id,
+        "ticket_id": grievance.ticket_id if grievance else f"INC-{incident.id}",
         "asset_id": incident.asset_id,
         "event_type": incident.event_type,
         "current_state": incident.current_state,
+        "title": grievance.title if grievance else asset.name,
+        "description": grievance.description if grievance else "",
+        "priority": enum_value(grievance.priority) if grievance else "medium",
+        "department": grievance.department.name if grievance and grievance.department else "Pending",
+        "district": grievance.district if grievance else asset.district,
+        "block": grievance.block if grievance else "",
+        "panchayat": grievance.panchayat if grievance else "",
+        "citizen_name": (
+            grievance.citizen_name
+            if grievance and grievance.citizen_name
+            else ("Anonymous" if grievance else None)
+        ),
+        "citizen_contact": grievance.citizen_contact if grievance else None,
+        "verification_state": "Verified" if grievance and grievance.is_verified else "Pending Verification",
+        "resolution_notes": grievance.resolution_notes if grievance else None,
+        "resolution_photo_url": grievance.resolution_photo_url if grievance else None,
+        "primary_image_url": primary_image_url,
+        "gallery_images": gallery_images,
         "created_at": to_iso(incident.created_at),
         "updated_at": to_iso(incident.updated_at),
     },
 
     "summary": {
-        "evidence_count": len(evidence_list),
+        "evidence_count": evidence_count,
         "transition_count": len(transitions),
         "current_status": incident.current_state,
+        "upvotes": int(grievance.upvotes or 0) if grievance else 0,
+        "sla_status": sla_status,
+        "created_date": to_iso(grievance.created_at if grievance else incident.created_at),
         "last_updated": to_iso(
             incident.updated_at or incident.created_at
         ),
@@ -241,9 +304,15 @@ def get_incident(
 
     "evidence": [
         {
+            "id": e.id,
+            "incident_id": e.incident_id,
             "source": e.source.name if e.source else "Unknown",
             "evidence_type": e.evidence_type,
             "summary": e.summary,
+            "uploaded_by": e.uploaded_by,
+            "image_url": e.image_url or (e.payload or {}).get("image_url"),
+            "description": e.description,
+            "verification_status": e.verification_status,
             "created_at": to_iso(e.created_at),
         }
         for e in evidence_list
@@ -278,11 +347,14 @@ class StaffLoginRequest(BaseModel):
 class GrievanceResponse(BaseModel):
     id: int
     ticket_id: str
+    incident_id: Optional[int] = None
     title: str
     description: str
     district: str
     block: str
     panchayat: str
+    citizenName: Optional[str] = None
+    citizenContact: Optional[str] = None
     upvotes: int
     is_verified: bool
     terrainRisk: str
@@ -290,6 +362,8 @@ class GrievanceResponse(BaseModel):
     department: str
     status: str
     priority: str
+    intakePhotoUrl: str = ""
+    evidenceCount: int = 0
     sla_due_date: datetime
     created_at: datetime
     resolved_at: Optional[datetime] = None
@@ -513,16 +587,184 @@ def get_or_create_officer(
     db.flush()
     return officer
 
+def get_or_create_data_source(db: Session, name: str, priority: int = 50) -> models.DataSource:
+    source = db.query(models.DataSource).filter(models.DataSource.name == name).first()
+    if source is not None:
+        return source
+
+    source = models.DataSource(name=name, source_priority=priority)
+    db.add(source)
+    db.flush()
+    return source
+
+def safe_upload_filename(original_name: str) -> str:
+    suffix = Path(original_name or "").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Evidence file must be a JPG, PNG or WEBP image.",
+        )
+    timestamp = utc_now().strftime("%Y%m%d%H%M%S%f")
+    stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(original_name).stem).strip("-")[:40]
+    return f"{timestamp}-{stem or 'evidence'}{suffix}"
+
+def save_upload_file(upload: UploadFile) -> str:
+    stored_name = safe_upload_filename(upload.filename or "evidence.jpg")
+    now = utc_now()
+    month_dir = UPLOAD_ROOT / f"{now:%Y}" / f"{now:%m}"
+    month_dir.mkdir(parents=True, exist_ok=True)
+    destination = month_dir / stored_name
+    with destination.open("wb") as buffer:
+        shutil.copyfileobj(upload.file, buffer)
+    return f"{UPLOAD_PUBLIC_PREFIX}/{now:%Y}/{now:%m}/{stored_name}"
+
+def tokenize_for_match(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", (value or "").lower())
+        if len(token) > 2
+    }
+
+def similarity_score(left: str, right: str) -> float:
+    left_tokens = tokenize_for_match(left)
+    right_tokens = tokenize_for_match(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+def find_matching_active_incident(
+    db: Session,
+    panchayat: str,
+    title: str,
+    description: str,
+) -> Optional[Incident]:
+    active_linked = (
+        db.query(Grievance)
+        .filter(
+            Grievance.panchayat == panchayat,
+            Grievance.incident_id.isnot(None),
+            Grievance.status.in_(ACTIVE_STATUSES),
+        )
+        .order_by(Grievance.created_at.desc())
+        .all()
+    )
+    for existing in active_linked:
+        title_score = similarity_score(existing.title, title)
+        description_score = similarity_score(existing.description, description)
+        if title_score >= 0.35 or description_score >= 0.25:
+            return existing.incident
+    return None
+
+def create_report_asset(
+    db: Session,
+    title: str,
+    infrastructure_type: str,
+    district: str,
+    latitude: Optional[Decimal],
+    longitude: Optional[Decimal],
+) -> Asset:
+    asset = Asset(
+        asset_type=infrastructure_type,
+        name=title[:120],
+        district=district,
+        lat=float(latitude) if latitude is not None else None,
+        lon=float(longitude) if longitude is not None else None,
+    )
+    db.add(asset)
+    db.flush()
+    return asset
+
+def append_incident_timeline(
+    db: Session,
+    incident: Incident,
+    to_state: str,
+    actor_type: str,
+    reason: str,
+    evidence_id: Optional[int] = None,
+) -> EventStateTransition:
+    transition = EventStateTransition(
+        incident_id=incident.id,
+        from_state=incident.current_state,
+        to_state=to_state,
+        actor_type=actor_type,
+        reason=reason,
+        evidence_id=evidence_id,
+    )
+    incident.current_state = to_state
+    incident.updated_at = utc_now()
+    db.add(transition)
+    db.flush()
+    return transition
+
+def append_incident_evidence(
+    db: Session,
+    incident_id: int,
+    source_name: str,
+    uploaded_by: str,
+    image_url: Optional[str],
+    description: str,
+    evidence_type: str = "Image",
+    verification_status: str = "Pending Verification",
+    source_priority: int = 50,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Evidence:
+    source = get_or_create_data_source(db, source_name, source_priority)
+    payload = {
+        "image_url": image_url,
+        "description": description,
+        "uploaded_by": uploaded_by,
+        "verification_status": verification_status,
+    }
+    if metadata:
+        payload.update(metadata)
+    evidence = Evidence(
+        incident_id=incident_id,
+        source_id=source.id,
+        evidence_type=evidence_type,
+        summary=description,
+        payload=payload,
+        uploaded_by=uploaded_by,
+        image_url=image_url,
+        description=description,
+        verification_status=verification_status,
+        source_timestamp=utc_now(),
+    )
+    db.add(evidence)
+    db.flush()
+    return evidence
+
+def get_primary_grievance_for_incident(db: Session, incident_id: int) -> Optional[Grievance]:
+    return (
+        db.query(Grievance)
+        .filter(Grievance.incident_id == incident_id)
+        .order_by(Grievance.created_at.asc())
+        .first()
+    )
+
+def resolve_incident_by_ref(db: Session, incident_ref: str) -> Optional[Incident]:
+    grievance_for_ref = db.query(Grievance).filter(Grievance.ticket_id == incident_ref).first()
+    if grievance_for_ref and grievance_for_ref.incident_id:
+        return db.query(Incident).filter(Incident.id == grievance_for_ref.incident_id).first()
+    if incident_ref.isdigit():
+        return db.query(Incident).filter(Incident.id == int(incident_ref)).first()
+    return None
+
 
 def ensure_schema_updates() -> None:
     db = SessionLocal()
     try:
-        db.execute(
-            text(
-                "ALTER TABLE grievances "
-                "ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT false;"
-            )
-        )
+        for statement in (
+            "ALTER TABLE grievances ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT false;",
+            "ALTER TABLE grievances ADD COLUMN IF NOT EXISTS incident_id INTEGER;",
+            "ALTER TABLE grievances ADD COLUMN IF NOT EXISTS citizen_name VARCHAR(120);",
+            "ALTER TABLE grievances ADD COLUMN IF NOT EXISTS citizen_contact VARCHAR(120);",
+            "CREATE INDEX IF NOT EXISTS ix_grievances_incident_id ON grievances (incident_id);",
+            "ALTER TABLE evidence ADD COLUMN IF NOT EXISTS uploaded_by VARCHAR(120);",
+            "ALTER TABLE evidence ADD COLUMN IF NOT EXISTS image_url VARCHAR(255);",
+            "ALTER TABLE evidence ADD COLUMN IF NOT EXISTS description TEXT;",
+            "ALTER TABLE evidence ADD COLUMN IF NOT EXISTS verification_status VARCHAR(40) NOT NULL DEFAULT 'Pending Verification';",
+        ):
+            db.execute(text(statement))
         db.commit()
     except Exception:
         db.rollback()
@@ -620,12 +862,113 @@ def bootstrap_database() -> None:
         if db.query(Grievance.id).first() is None:
             seed_bootstrap_grievances(db, citizen, districts, departments, subcategories)
 
+        migrate_legacy_ticket_ids(db)
+        backfill_incidents_for_grievances(db)
+
         db.commit()
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+
+def next_daily_hs_ticket_id(db: Session, created_at: datetime, used: set[str]) -> str:
+    day_prefix = f"HS-{created_at:%Y%m%d}-"
+    existing_ids = [
+        row[0]
+        for row in db.query(Grievance.ticket_id)
+        .filter(Grievance.ticket_id.like(f"{day_prefix}%"))
+        .all()
+    ]
+    max_sequence = 0
+    for ticket_id in existing_ids:
+        match = re.search(r"-(\d{4})$", ticket_id)
+        if match:
+            max_sequence = max(max_sequence, int(match.group(1)))
+
+    sequence = max_sequence + 1
+    while True:
+        candidate = f"{day_prefix}{sequence:04d}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        sequence += 1
+
+def migrate_legacy_ticket_ids(db: Session) -> None:
+    legacy_tickets = (
+        db.query(Grievance)
+        .filter(~Grievance.ticket_id.op("~")(r"^HS-[0-9]{8}-[0-9]{4}$"))
+        .order_by(Grievance.created_at.asc(), Grievance.id.asc())
+        .all()
+    )
+    used = {row[0] for row in db.query(Grievance.ticket_id).all()}
+    for ticket in legacy_tickets:
+        old_ticket_id = ticket.ticket_id
+        ticket.ticket_id = next_daily_hs_ticket_id(db, ticket.created_at or utc_now(), used)
+        db.add(
+            Notification(
+                grievance_id=ticket.id,
+                recipient_type="System",
+                channel="Email",
+                message=f"Legacy ticket {old_ticket_id} migrated to HimSetu ticket {ticket.ticket_id}.",
+            )
+        )
+
+def backfill_incidents_for_grievances(db: Session) -> None:
+    tickets = (
+        db.query(Grievance)
+        .filter(Grievance.incident_id.is_(None))
+        .order_by(Grievance.created_at.asc())
+        .all()
+    )
+    for ticket in tickets:
+        asset = create_report_asset(
+            db=db,
+            title=ticket.title,
+            infrastructure_type=ticket.infrastructure_type,
+            district=ticket.district,
+            latitude=ticket.latitude,
+            longitude=ticket.longitude,
+        )
+        incident = Incident(
+            asset_id=asset.id,
+            event_type=ticket.infrastructure_type,
+            current_state=enum_value(ticket.status),
+            created_at=ticket.created_at,
+            updated_at=ticket.updated_at,
+        )
+        db.add(incident)
+        db.flush()
+        ticket.incident_id = incident.id
+        if not ticket.citizen_name:
+            ticket.citizen_name = ticket.citizen.name if ticket.citizen else "Anonymous"
+
+        image_url = ticket.intake_photo_url or ""
+        evidence_id = None
+        if image_url:
+            evidence = append_incident_evidence(
+                db=db,
+                incident_id=incident.id,
+                source_name="Citizen",
+                uploaded_by=ticket.citizen_name or "Anonymous",
+                image_url=image_url,
+                description=f"Citizen submitted photograph for {ticket.title}",
+                evidence_type="Image",
+                verification_status="Verified" if ticket.is_verified else "Pending Verification",
+                source_priority=40,
+            )
+            evidence_id = evidence.id
+        db.add(
+            EventStateTransition(
+                incident_id=incident.id,
+                from_state=None,
+                to_state=enum_value(ticket.status),
+                actor_type="Citizen",
+                reason="Citizen report submitted",
+                evidence_id=evidence_id,
+                created_at=ticket.created_at,
+            )
+        )
 
 def seed_bootstrap_grievances(
     db: Session,
@@ -741,20 +1084,32 @@ def find_assignment_officer(db: Session, department_id: int, district_id: Option
         Officer.is_active.is_(True),
     ).order_by(Officer.id.asc()).first()
 
-def generate_ticket_id(department_code: str, now: datetime) -> str:
-    safe_code = re.sub(r"[^A-Z0-9]", "", department_code.upper())[:6]
-    return f"HP-{now:%Y}-{safe_code or 'HP'}-{now:%m%d%H%M%S%f}"
+def generate_ticket_id(sequence: int, now: datetime) -> str:
+    return f"HS-{now:%Y%m%d}-{sequence:04d}"
 
 def ensure_unique_ticket_id(db: Session, department_code: str) -> tuple[str, datetime]:
-    for _ in range(5):
-        now = utc_now()
-        ticket_id = generate_ticket_id(department_code, now)
+    now = utc_now()
+    day_prefix = f"HS-{now:%Y%m%d}-"
+    latest_ticket = (
+        db.query(Grievance.ticket_id)
+        .filter(Grievance.ticket_id.like(f"{day_prefix}%"))
+        .order_by(Grievance.ticket_id.desc())
+        .first()
+    )
+    next_sequence = 1
+    if latest_ticket:
+        match = re.search(r"-(\d{4})$", latest_ticket[0])
+        if match:
+            next_sequence = int(match.group(1)) + 1
+
+    for sequence in range(next_sequence, next_sequence + 100):
+        ticket_id = generate_ticket_id(sequence, now)
         exists = db.query(Grievance.id).filter(Grievance.ticket_id == ticket_id).first()
         if not exists:
             return ticket_id, now
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Unable to generate a unique grievance ticket id.",
+        detail="Unable to generate a unique HimSetu ticket id.",
     )
 
 def decimal_coord(value: Optional[float], district: str, index: int) -> Optional[Decimal]:
@@ -790,21 +1145,27 @@ def calculate_composite_score(grievance: Grievance) -> int:
     )
 
 def serialize_grievance(grievance: Grievance) -> GrievanceResponse:
+    evidence_count = len(grievance.incident.evidence_list) if grievance.incident else 0
     return GrievanceResponse(
         id=grievance.id,
         ticket_id=grievance.ticket_id,
+        incident_id=grievance.incident_id,
         title=grievance.title,
         description=grievance.description,
         district=grievance.district,
         block=grievance.block,
         panchayat=grievance.panchayat,
+        citizenName=grievance.citizen_name or (grievance.citizen.name if grievance.citizen else "Anonymous"),
+        citizenContact=grievance.citizen_contact,
         upvotes=int(grievance.upvotes or 0),
         is_verified=bool(grievance.is_verified),
         terrainRisk=grievance.terrain_risk,
         infrastructureType=grievance.infrastructure_type,
-        department=grievance.department.name,
+        department=grievance.department.name if grievance.department else "Unassigned",
         status=enum_value(grievance.status),
         priority=enum_value(grievance.priority),
+        intakePhotoUrl=grievance.intake_photo_url or "",
+        evidenceCount=evidence_count,
         sla_due_date=grievance.sla_due_date,
         created_at=grievance.created_at,
         resolved_at=grievance.resolved_at,
@@ -949,6 +1310,44 @@ def list_grievances(db: Session = Depends(get_db)) -> List[GrievanceResponse]:
     tickets = db.query(Grievance).order_by(Grievance.created_at.desc()).all()
     return [serialize_grievance(ticket) for ticket in tickets]
 
+@app.get("/api/community-discovery", response_model=List[GrievanceResponse])
+def community_discovery(db: Session = Depends(get_db)) -> List[GrievanceResponse]:
+    """Community-facing incident cards sourced from submitted grievances."""
+    promote_high_upvote_tickets(db)
+    tickets = db.query(Grievance).order_by(Grievance.created_at.desc()).all()
+    return [serialize_grievance(ticket) for ticket in tickets]
+
+@app.get("/api/ticket-telemetry")
+def live_ticket_telemetry(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    """Operational feed only: no discussion, comments or evidence gallery."""
+    promote_high_upvote_tickets(db)
+    tickets = db.query(Grievance).order_by(Grievance.created_at.desc()).all()
+    now = utc_now()
+    rows = []
+    for ticket in tickets:
+        status_value = enum_value(ticket.status)
+        if status_value not in ACTIVE_STATUSES:
+            progress = 4
+        elif status_value == "Pending":
+            progress = 1
+        elif status_value == "Under Verification":
+            progress = 2
+        else:
+            progress = 3
+        rows.append({
+            "ticket_id": ticket.ticket_id,
+            "incident_id": ticket.incident_id,
+            "status": status_value,
+            "priority": enum_value(ticket.priority),
+            "district": ticket.district,
+            "assigned_department": ticket.department.name if ticket.department else "Unassigned",
+            "verification_state": "Verified" if ticket.is_verified else "Pending Verification",
+            "sla_status": "Breached" if ticket.sla_due_date < now and status_value in ACTIVE_STATUSES else "On Track",
+            "timeline_progress": progress,
+            "created_at": to_iso(ticket.created_at),
+        })
+    return rows
+
 @app.post("/api/grievances", response_model=GrievanceResponse, status_code=status.HTTP_201_CREATED)
 def create_grievance(
     title: str = Form(...),
@@ -956,14 +1355,18 @@ def create_grievance(
     district: str = Form(...),
     block: str = Form(...),
     panchayat: str = Form(...),
-    terrainRisk: str = Form(...),
-    infrastructureType: str = Form(...),
+    terrainRisk: str = Form("Standard Rural Road"),
+    infrastructureType: str = Form("Connecting Bailey Bridge"),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
+    citizenName: Optional[str] = Form(None),
+    contact: Optional[str] = Form(None),
     citizenId: Optional[int] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
     db: Session = Depends(get_db),
 ) -> GrievanceResponse:
-    """Safe, robust multipart endpoint aligned to your true database schemas."""
+    """Create a citizen report and attach it to the incident/evidence lifecycle."""
     title = require_non_empty(title, "title")
     description = require_non_empty(description, "description")
     validate_location_hierarchy(district, block, panchayat)
@@ -981,14 +1384,55 @@ def create_grievance(
     )
     citizen = db.query(Citizen).filter(Citizen.id == citizenId).first() if citizenId else None
     ticket_id, now = ensure_unique_ticket_id(db, department.code)
+    latitude_value = decimal_coord(latitude, district, 0)
+    longitude_value = decimal_coord(longitude, district, 1)
+    upload_files = [upload for upload in (files or []) if upload and upload.filename]
+    if file is not None and file.filename:
+        upload_files.insert(0, file)
+    if not upload_files:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one evidence photograph is required.",
+        )
+    if len(upload_files) > 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A maximum of 3 evidence photographs can be uploaded.",
+        )
+    image_urls = [save_upload_file(upload) for upload in upload_files]
+    image_url = image_urls[0]
+    matched_incident = find_matching_active_incident(db, panchayat, title, description)
+    incident = matched_incident
+
+    if incident is None:
+        asset = create_report_asset(
+            db=db,
+            title=title,
+            infrastructure_type=infrastructureType,
+            district=district,
+            latitude=latitude_value,
+            longitude=longitude_value,
+        )
+        incident = Incident(
+            asset_id=asset.id,
+            event_type=infrastructureType,
+            current_state="Pending",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(incident)
+        db.flush()
     
     grievance = Grievance(
         ticket_id=ticket_id,
         citizen_id=citizen.id if citizen else None,
+        incident_id=incident.id,
+        citizen_name=(citizenName or "").strip() or (citizen.name if citizen else "Anonymous"),
+        citizen_contact=(contact or "").strip() or None,
         department_id=department.id,
         assigned_officer_id=officer.id if officer else None,
-        latitude=decimal_coord(latitude, district, 0),
-        longitude=decimal_coord(longitude, district, 1),
+        latitude=latitude_value,
+        longitude=longitude_value,
         district_id=district_obj.id,
         district=district,
         block=block,
@@ -999,7 +1443,7 @@ def create_grievance(
         is_verified=False,
         title=title,
         description=description,
-        intake_photo_url="",
+        intake_photo_url=image_url,
         status="Pending",
         priority=priority,
         is_flagged_to_cmo=False,
@@ -1010,6 +1454,51 @@ def create_grievance(
 
     try:
         db.add(grievance)
+        if matched_incident is not None:
+            primary = get_primary_grievance_for_incident(db, incident.id)
+            if primary is not None:
+                primary.upvotes = int(primary.upvotes or 0) + 1
+
+        first_evidence_id = None
+        for index, uploaded_image_url in enumerate(image_urls, start=1):
+            evidence = append_incident_evidence(
+                db=db,
+                incident_id=incident.id,
+                source_name="Citizen",
+                uploaded_by=grievance.citizen_name or "Anonymous",
+                image_url=uploaded_image_url,
+                description=(
+                    f"Citizen submitted primary photograph for {title}"
+                    if index == 1
+                    else f"Citizen submitted supporting photograph {index} for {title}"
+                ),
+                evidence_type="Image",
+                verification_status="Pending Verification",
+                source_priority=40,
+                metadata={
+                    "upload_order": index,
+                    "is_primary": index == 1,
+                },
+            )
+            if index == 1:
+                first_evidence_id = evidence.id
+        append_incident_timeline(
+            db=db,
+            incident=incident,
+            to_state=enum_value(grievance.status),
+            actor_type="Citizen",
+            reason="Citizen report submitted",
+            evidence_id=first_evidence_id,
+        )
+        db.add(
+            GrievanceLog(
+                grievance_id=grievance.id,
+                previous_status="Pending",
+                new_status="Pending",
+                remarks="Citizen report submitted",
+                action_by_officer_id=None,
+            )
+        )
         db.commit()
         db.refresh(grievance)
     except SQLAlchemyError as exc:
@@ -1038,6 +1527,147 @@ def upvote_grievance(ticket_id: str, db: Session = Depends(get_db)) -> Grievance
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Upvote transaction commit error.") from exc
     return serialize_grievance(grievance)
 
+@app.post("/api/incidents/{incident_id}/upvote", response_model=GrievanceResponse)
+def upvote_incident(incident_id: int, db: Session = Depends(get_db)) -> GrievanceResponse:
+    grievance = get_primary_grievance_for_incident(db, incident_id)
+    if grievance is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident grievance profile not found.")
+    return upvote_grievance(grievance.ticket_id, db)
+
+@app.post("/api/incidents/{incident_id}/evidence")
+def upload_incident_evidence(
+    incident_id: int,
+    description: str = Form("Community uploaded evidence"),
+    source: str = Form("Community"),
+    uploadedBy: str = Form("Anonymous"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    incident = db.query(Incident).filter(Incident.id == incident_id).with_for_update().first()
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found.")
+
+    image_url = save_upload_file(file)
+    evidence = append_incident_evidence(
+        db=db,
+        incident_id=incident.id,
+        source_name=source,
+        uploaded_by=uploadedBy.strip() or "Anonymous",
+        image_url=image_url,
+        description=description.strip() or "Community uploaded evidence",
+        evidence_type="Image",
+        verification_status="Pending Verification",
+        source_priority=40,
+    )
+    append_incident_timeline(
+        db=db,
+        incident=incident,
+        to_state=incident.current_state,
+        actor_type=source,
+        reason="Community uploaded evidence",
+        evidence_id=evidence.id,
+    )
+
+    try:
+        db.commit()
+        db.refresh(evidence)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Evidence upload commit error.") from exc
+
+    return {
+        "evidence_id": evidence.id,
+        "incident_id": incident.id,
+        "image_url": evidence.image_url,
+        "verification_status": evidence.verification_status,
+        "created_at": to_iso(evidence.created_at),
+    }
+
+@app.post("/api/incidents/{incident_ref}/community-replies")
+def add_community_reply(
+    incident_ref: str,
+    comment: str = Form(...),
+    uploadedBy: str = Form("Community Member"),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    incident = resolve_incident_by_ref(db, incident_ref)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found.")
+
+    comment_text = require_non_empty(comment, "comment")
+    display_name = uploadedBy.strip() or "Community Member"
+    evidence_id = None
+    image_url = None
+    if file is not None and file.filename:
+        image_url = save_upload_file(file)
+        evidence = append_incident_evidence(
+            db=db,
+            incident_id=incident.id,
+            source_name="Community",
+            uploaded_by=display_name,
+            image_url=image_url,
+            description=f"Community proof attached: {comment_text}",
+            evidence_type="Community Proof",
+            verification_status="Pending Verification",
+            source_priority=40,
+        )
+        evidence_id = evidence.id
+
+    append_incident_timeline(
+        db=db,
+        incident=incident,
+        to_state=incident.current_state,
+        actor_type="Community",
+        reason=f"Community reply by {display_name}: {comment_text}",
+        evidence_id=evidence_id,
+    )
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Community reply commit error.") from exc
+
+    grievance = get_primary_grievance_for_incident(db, incident.id)
+    return {
+        "incident_id": incident.id,
+        "ticket_id": grievance.ticket_id if grievance else f"INC-{incident.id}",
+        "author": display_name,
+        "comment": comment_text,
+        "image_url": image_url,
+        "evidence_id": evidence_id,
+        "created_at": to_iso(utc_now()),
+    }
+
+@app.post("/api/incidents/{incident_id}/duplicates")
+def report_duplicate_incident(
+    incident_id: int,
+    duplicateIncidentId: Optional[int] = Form(None),
+    remarks: str = Form("Community duplicate report"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found.")
+    append_incident_timeline(
+        db=db,
+        incident=incident,
+        to_state=incident.current_state,
+        actor_type="Community",
+        reason=(
+            f"Duplicate reported against incident {duplicateIncidentId}: {remarks}"
+            if duplicateIncidentId
+            else f"Duplicate report filed: {remarks}"
+        ),
+    )
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Duplicate report commit error.") from exc
+    return {"incident_id": incident.id, "status": "duplicate_report_logged"}
+
 
 @app.patch("/api/grievances/{ticket_id}/verification", response_model=GrievanceVerificationResponse)
 def update_grievance_verification(
@@ -1059,6 +1689,7 @@ def update_grievance_verification(
         )
 
     previous_verification = bool(grievance.is_verified)
+    previous_status = enum_value(grievance.status)
     grievance.is_verified = bool(payload.isVerified)
     if grievance.is_verified and enum_value(grievance.status) == "Pending":
         grievance.status = "Under Verification"
@@ -1076,6 +1707,28 @@ def update_grievance_verification(
             ),
         )
     )
+    if grievance.incident_id:
+        incident = db.query(Incident).filter(Incident.id == grievance.incident_id).first()
+        if incident is not None:
+            append_incident_timeline(
+                db=db,
+                incident=incident,
+                to_state=enum_value(grievance.status),
+                actor_type="Officer",
+                reason=verification_note or (
+                    "Verification started" if grievance.is_verified else "Verification state updated"
+                ),
+            )
+    if previous_status != enum_value(grievance.status):
+        db.add(
+            GrievanceLog(
+                grievance_id=grievance.id,
+                previous_status=previous_status,
+                new_status=enum_value(grievance.status),
+                remarks=verification_note or "Verification started",
+                action_by_officer_id=officer.id,
+            )
+        )
 
     try:
         db.commit()
@@ -1120,6 +1773,34 @@ def resolve_grievance(
     grievance.resolved_at = now
     grievance.resolution_notes = resolution_notes
     grievance.resolution_photo_url = validation_image_url
+    evidence_id = None
+    if grievance.incident_id:
+        evidence = append_incident_evidence(
+            db=db,
+            incident_id=grievance.incident_id,
+            source_name=grievance.department.name if grievance.department else "Department",
+            uploaded_by=(
+                grievance.assigned_officer.name
+                if grievance.assigned_officer
+                else "Assigned Department"
+            ),
+            image_url=validation_image_url,
+            description=f"Resolution uploaded: {resolution_notes}",
+            evidence_type="Resolution Photograph",
+            verification_status="Verified",
+            source_priority=90,
+        )
+        evidence_id = evidence.id
+        incident = db.query(Incident).filter(Incident.id == grievance.incident_id).first()
+        if incident is not None:
+            append_incident_timeline(
+                db=db,
+                incident=incident,
+                to_state="Verified Resolved",
+                actor_type=grievance.department.name if grievance.department else "Department",
+                reason=f"Resolution uploaded: {resolution_notes}",
+                evidence_id=evidence_id,
+            )
 
     log = GrievanceLog(
         grievance_id=grievance.id,
@@ -1176,6 +1857,31 @@ def file_citizen_veto(
     grievance.reopened_count = int(grievance.reopened_count or 0) + 1
     grievance.is_escalated_to_supervisor = True
     grievance.sla_due_date = now + timedelta(hours=24)
+    evidence_id = None
+    if grievance.incident_id and payload.evidence_photo_url:
+        evidence = append_incident_evidence(
+            db=db,
+            incident_id=grievance.incident_id,
+            source_name="Citizen",
+            uploaded_by=grievance.citizen_name or "Citizen",
+            image_url=payload.evidence_photo_url,
+            description=f"Citizen veto evidence: {veto_remarks}",
+            evidence_type="Citizen Veto Photograph",
+            verification_status="Pending Verification",
+            source_priority=40,
+        )
+        evidence_id = evidence.id
+    if grievance.incident_id:
+        incident = db.query(Incident).filter(Incident.id == grievance.incident_id).first()
+        if incident is not None:
+            append_incident_timeline(
+                db=db,
+                incident=incident,
+                to_state="Reopened via Citizen Veto",
+                actor_type="Citizen",
+                reason=f"Citizen veto filed: {veto_remarks}",
+                evidence_id=evidence_id,
+            )
 
     veto_record = CitizenVeto(
         grievance_id=grievance.id,

@@ -15,6 +15,14 @@ import {
   Building2,
 } from "lucide-react";
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+
+function normalizeMediaUrl(url) {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${BACKEND_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 function TelemetryCard({ icon: Icon, label, value, tone }) {
   return (
     <div className="rounded-sm border border-[var(--him-stone)] bg-white p-3 shadow-xs">
@@ -105,13 +113,28 @@ export default function IncidentPage() {
   };
 
   useEffect(() => {
-    fetch(`http://localhost:8000/api/incidents/${id}`)
+    fetch(`${BACKEND_URL}/api/incidents/${id}`)
       .then((r) => {
         if (!r.ok) {
           throw new Error("Failed to load incident");
         }
         return r.json();
       })
+      .then((payload) => ({
+        ...payload,
+        incident: {
+          ...payload.incident,
+          primary_image_url: normalizeMediaUrl(payload.incident?.primary_image_url),
+          gallery_images: (payload.incident?.gallery_images || []).map((item) => ({
+            ...item,
+            image_url: normalizeMediaUrl(item.image_url),
+          })),
+        },
+        evidence: (payload.evidence || []).map((item) => ({
+          ...item,
+          image_url: normalizeMediaUrl(item.image_url),
+        })),
+      }))
       .then(setData)
       .catch((err) => {
         console.error(err);
@@ -153,7 +176,7 @@ export default function IncidentPage() {
               </span>
             </div>
             <h1 className="text-xl font-black text-[var(--devdar-forest)] uppercase tracking-tight">
-              {data.asset.name}
+              {data.incident.title || data.asset.name}
             </h1>
             <p className="mt-1 text-xs text-slate-600">
               {data.asset.asset_type} • {data.asset.district} District
@@ -170,29 +193,73 @@ export default function IncidentPage() {
           <TelemetryCard
             icon={FileText}
             label="Incident ID"
-            value={data.incident.id || "N/A"}
+            value={data.incident.ticket_id || data.incident.id || "N/A"}
             tone="text-[var(--devdar-forest)]"
           />
           <TelemetryCard
             icon={MapPin}
             label="District / Block"
-            value={`${data.asset.district}`}
+            value={`${data.incident.district || data.asset.district} / ${data.incident.block || "N/A"}`}
             tone="text-[var(--devdar-forest)]"
           />
           <TelemetryCard
             icon={Zap}
             label="Infrastructure"
-            value={data.asset.asset_type || "N/A"}
+            value={data.incident.event_type || data.asset.asset_type || "N/A"}
             tone="text-amber-700"
           />
           <TelemetryCard
             icon={Clock3}
             label="Created"
-            value={data.summary?.created_date ? new Date(data.summary.created_date).toLocaleDateString("en-IN") : "N/A"}
+            value={data.summary?.created_date ? new Date(data.summary.created_date).toLocaleString("en-IN") : "N/A"}
             tone="text-slate-700"
           />
         </div>
       </div>
+
+      {(data.incident.primary_image_url || data.incident.gallery_images?.length > 0) && (
+        <section className="kathkuni-card bg-white p-4">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="overflow-hidden rounded-sm border border-[var(--him-stone)] bg-slate-100">
+              {data.incident.primary_image_url ? (
+                <img
+                  src={data.incident.primary_image_url}
+                  alt=""
+                  className="h-72 w-full object-cover"
+                />
+              ) : (
+                <div className="grid h-72 place-items-center text-xs font-bold uppercase text-slate-400">
+                  No primary image
+                </div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Evidence Gallery
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {(data.incident.gallery_images || []).map((image) => (
+                  <div
+                    key={`${image.id}-${image.upload_order}`}
+                    className="relative overflow-hidden rounded-sm border border-[var(--him-stone)] bg-slate-100"
+                  >
+                    <img
+                      src={image.image_url}
+                      alt=""
+                      className="h-24 w-full object-cover"
+                    />
+                    {image.is_primary && (
+                      <span className="absolute left-1 top-1 rounded-sm bg-white/90 px-1.5 py-0.5 text-[8px] font-black uppercase text-[var(--devdar-forest)]">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* LIFECYCLE PROGRESS TIMELINE */}
       <LifecycleTimeline status={data.incident.current_state} />

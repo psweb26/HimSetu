@@ -100,6 +100,7 @@ class Incident(Base):
     asset = relationship("Asset", back_populates="incidents")
     evidence_list = relationship("Evidence", back_populates="incident")
     transitions = relationship("EventStateTransition", back_populates="incident")
+    grievances = relationship("Grievance", back_populates="incident")
 
 class Evidence(Base):
     __tablename__ = "evidence"
@@ -109,6 +110,10 @@ class Evidence(Base):
     evidence_type = Column(String, nullable=False) # Image, Bulletin, Report
     summary = Column(String)
     payload = Column(JSON, nullable=False) # Immutable raw data
+    uploaded_by = Column(String(120), nullable=True)
+    image_url = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    verification_status = Column(String(40), nullable=False, server_default="Pending Verification")
     source_timestamp = Column(DateTime)
     created_at = Column(DateTime, default=func.now())
     incident = relationship("Incident", back_populates="evidence_list")
@@ -258,7 +263,10 @@ class Grievance(Base):
 
     id = Column(Integer, primary_key=True)
     ticket_id = Column(String(40), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True, index=True)
     citizen_id = Column(Integer, ForeignKey("citizens.id"), nullable=True)
+    citizen_name = Column(String(120), nullable=True)
+    citizen_contact = Column(String(120), nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     subcategory_id = Column(
         Integer,
@@ -342,6 +350,7 @@ class Grievance(Base):
     resolution_photo_url = Column(String(255), nullable=True)
 
     citizen = relationship("Citizen", back_populates="grievances")
+    incident = relationship("Incident", back_populates="grievances")
     category = relationship("Category", back_populates="grievances")
     subcategory = relationship("Subcategory", back_populates="grievances")
     department = relationship("Department", back_populates="grievances")

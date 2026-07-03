@@ -1,6 +1,6 @@
 import { CheckCircle2, Clock, AlertCircle, Flame } from 'lucide-react';
 
-function LifecycleNode({ stage, isActive, isResolved, isPending, isReopened, label }) {
+function LifecycleNode({ isActive, isResolved, isPending, isReopened, label }) {
   let bgColor = 'bg-slate-100';
   let borderColor = 'border-slate-300';
   let textColor = 'text-slate-600';
@@ -67,6 +67,7 @@ export default function LifecycleTimeline({ status }) {
 
   const statusMap = {
     'Pending': 'pending',
+    'Pending Verification': 'pending',
     'Under Verification': 'verification',
     'Department Assigned': 'assigned',
     'Verified Resolved': 'resolved',

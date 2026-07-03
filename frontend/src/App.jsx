@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -17,23 +18,31 @@ import {
   Clock3,
   CloudLightning,
   FileText,
+  Layers,
+  ShieldCheck,
+  ThumbsUp,
+  CalendarDays,
   Gauge,
   ImagePlus,
   CheckCircle2,
   Loader2,
   Radio,
   RefreshCcw,
-  Send,
   Siren,
   Sparkles,
   TimerReset,
   UserRound,
+  ArrowRight,
   X,
   XCircle,
 } from "lucide-react";
 
-import HimachalVectorMap from "./components/HimachalVectorMap";
 import IncidentQueue from "./components/IncidentQueue";
+import GrievanceForm from "./components/GrievanceForm";
+
+import LiveTicketTelemetry from "./components/LiveTicketTelemetry";
+import dummyEvidence from "./assets/dummy_evidence.png";
+import HimachalVectorMap from "./components/HimachalVectorMap";
 import IdentityMosaic from "./components/IdentityMosaic";
 import himachalCrest from "./assets/himachal-crest.png";
 import { COMPREHENSIVE_HERITAGE_REGISTRY } from "./assets/culturalData";
@@ -43,6 +52,7 @@ const UPVOTE_CRITICAL_THRESHOLD = 30;
 const FLASH_FLOOD_RISK = "Flash Flood Khud Proximity";
 const CLOCK_INTERVAL_MS = 60_000;
 const APP_CLOCK_STARTED_AT_MS = new Date().getTime();
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
 const views = [
   {
@@ -148,6 +158,45 @@ const inputClass =
   "focus:border-[var(--him-pine)] focus:ring-2 focus:ring-[var(--him-pine)]/20 shadow-[var(--glass-shadow)]";
 
 const cx = (...classes) => classes.filter(Boolean).join(" ");
+
+function normalizeMediaUrl(url) {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${BACKEND_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+function normalizeGrievance(ticket) {
+  if (!ticket) return null;
+  const ticketId = ticket.ticket_id || ticket.id;
+  return {
+    ...ticket,
+    id: ticketId,
+    ticketId,
+    incidentId: ticket.incident_id || ticket.incidentId || null,
+    title: ticket.title || "Untitled incident",
+    description: ticket.description || "",
+    district: ticket.district || "",
+    block: ticket.block || "",
+    panchayat: ticket.panchayat || "",
+    citizenName: ticket.citizenName || "Anonymous",
+    upvotes: Number(ticket.upvotes || 0),
+    terrainRisk: ticket.terrainRisk || ticket.terrain_risk || "Standard Rural Road",
+    infrastructureType:
+      ticket.infrastructureType ||
+      ticket.infrastructure_type ||
+      "Connecting Bailey Bridge",
+    department: ticket.department || "Unassigned",
+    priority: ticket.priority || "medium",
+    status: ticket.status || "Pending",
+    createdAt: ticket.created_at || ticket.createdAt || new Date().toISOString(),
+    slaDueAt: ticket.sla_due_date || ticket.slaDueAt || new Date().toISOString(),
+    intakePhotoUrl: normalizeMediaUrl(ticket.intakePhotoUrl || ticket.intake_photo_url),
+    evidenceCount: Number(ticket.evidenceCount || ticket.evidence_count || 0),
+    isVerified: Boolean(ticket.is_verified || ticket.isVerified),
+    resolutionNotes: ticket.resolutionNotes || "",
+    validationImageUrl: normalizeMediaUrl(ticket.validationImageUrl || ""),
+  };
+}
 
 function addHours(date, hours) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
@@ -282,6 +331,7 @@ const initialGrievances = [
 ];
 
 function App() {
+  const navigate = useNavigate();
   const [activeView, setActiveView] = useState(() => {
     if (typeof window === "undefined") {
       return "civic";
@@ -294,6 +344,15 @@ function App() {
   const [clockTicks, setClockTicks] = useState(0);
   const [selectedDistrict, setSelectedDistrict] = useState("");
   const nowMs = APP_CLOCK_STARTED_AT_MS + clockTicks * CLOCK_INTERVAL_MS;
+
+  const loadGrievances = useCallback(async () => {
+    const response = await fetch(`${BACKEND_URL}/api/community-discovery`);
+    if (!response.ok) {
+      throw new Error("Failed to load community discovery feed.");
+    }
+    const payload = await response.json();
+    setGrievances(Array.isArray(payload) ? payload.map(normalizeGrievance) : []);
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -308,6 +367,12 @@ function App() {
 
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    loadGrievances().catch((err) => {
+      console.error(err);
+    });
+  }, [loadGrievances]);
 
   function handleCreateGrievance(form) {
     const priority = derivePriorityFromTerrain(form.terrainRisk);
@@ -338,53 +403,44 @@ function App() {
     return ticket;
   }
 
-  function handleUpvote(ticketId) {
+  async function handleUpvote(ticketId) {
+    const response = await fetch(`${BACKEND_URL}/api/grievances/${ticketId}/upvote`, {
+      method: "POST",
+    });
+    if (!response.ok) return;
+    const updated = normalizeGrievance(await response.json());
     setGrievances((current) =>
-      current.map((ticket) => {
-        if (ticket.id !== ticketId) {
-          return ticket;
-        }
-
-        const upvotes = ticket.upvotes + 1;
-        return {
-          ...ticket,
-          upvotes,
-          priority:
-            upvotes > UPVOTE_CRITICAL_THRESHOLD ? "critical" : ticket.priority,
-        };
-      }),
+      current.map((ticket) => (ticket.id === ticketId ? updated : ticket)),
     );
   }
 
-  function handleResolve(ticketId, resolutionNotes, validationImageUrl) {
-    setGrievances((current) =>
-      current.map((ticket) =>
-        ticket.id === ticketId
-          ? {
-              ...ticket,
-              status: "Verified Resolved",
-              resolvedAt: new Date().toISOString(),
-              resolutionNotes,
-              validationImageUrl,
-            }
-          : ticket,
-      ),
-    );
+  async function handleResolve(ticketId, resolutionNotes, validationImageUrl) {
+    const response = await fetch(`${BACKEND_URL}/api/grievances/${ticketId}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolutionNotes, validationImageUrl }),
+    });
+    if (response.ok) {
+      await loadGrievances();
+    }
   }
 
-  function handleVeto(ticketId, vetoRemarks) {
-    setGrievances((current) =>
-      current.map((ticket) =>
-        ticket.id === ticketId
-          ? {
-              ...ticket,
-              status: "Reopened via Citizen Veto",
-              vetoRemarks,
-              vetoedAt: new Date().toISOString(),
-            }
-          : ticket,
-      ),
-    );
+  async function handleVeto(ticketId, vetoRemarks) {
+    const response = await fetch(`${BACKEND_URL}/api/grievances/${ticketId}/veto`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ veto_remarks: vetoRemarks }),
+    });
+    if (response.ok) {
+      await loadGrievances();
+    }
+  }
+
+  function openIncident(ticket) {
+    const ticketId = ticket?.id || ticket?.ticketId || ticket?.ticket_id;
+    if (ticketId) {
+      navigate(`/incidents/${ticketId}`);
+    }
   }
 
   return (
@@ -401,9 +457,12 @@ function App() {
             onUpvote={handleUpvote}
             onResolve={handleResolve}
             onVeto={handleVeto}
-            nowMs={nowMs}
+            onRefresh={loadGrievances}
+            onOpenIncident={openIncident}
+            backendUrl={BACKEND_URL}
             selectedDistrict={selectedDistrict}
             setSelectedDistrict={setSelectedDistrict}
+            nowMs={nowMs}
           />
         )}
 
@@ -531,65 +590,187 @@ function HeaderNavigation({ activeView, setActiveView }) {
   );
 }
 
+function calculateRemainingSla(ticket, nowMs) {
+  const remainingMs = new Date(ticket.slaDueAt).getTime() - nowMs;
+
+  if (remainingMs <= 0) return "Expired";
+
+  const hours = Math.floor(remainingMs / (1000 * 60 * 60));
+
+  if (hours < 24) return `${hours}h`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+function formatRelativeTime(timestamp, nowMs) {
+  const diff = nowMs - new Date(timestamp).getTime();
+
+  const minutes = Math.floor(diff / (1000 * 60));
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+
+  const hours = Math.floor(minutes / 60);
+
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+
+  return `${days}d ago`;
+}
+
 function CivicPillar({
   grievances,
   onCreateGrievance,
   onUpvote,
   onResolve,
   onVeto,
-  nowMs,
+  onRefresh,
+  onOpenIncident,
+  backendUrl,
   selectedDistrict,
   setSelectedDistrict,
+  nowMs,
 }) {
   const [form, setForm] = useState(() => {
     const firstDistrict = hpLocationMatrix[0];
     const firstBlock = firstDistrict.blocks[0];
 
     return {
-      citizenName: "Rina Thakur",
+      citizenName: "",
       district: firstDistrict.district,
       block: firstBlock.block,
       panchayat: firstBlock.panchayats[0],
       infrastructureType: "Connecting Bailey Bridge",
       terrainRisk: "Flash Flood Khud Proximity",
-      title: "Approach slab cracking after overnight rainfall",
-      description:
-        "The bridge approach has opened a fresh crack and two-wheelers are skidding near the khud edge.",
+      title: "",
+      description: "",
       intakePhotoUrl: "",
     };
   });
-  const [error, setError] = useState("");
+
   const [latestTicket, setLatestTicket] = useState(null);
-  const [focusedTicketId, setFocusedTicketId] = useState(null);
   const [selectedTicket, setSelectedTicket] = useState(null);
 
   const selectedDistrictConfig = hpLocationMatrix.find(
     (entry) => entry.district === form.district,
   );
   const blockOptions = selectedDistrictConfig?.blocks || [];
-  const selectedBlock = blockOptions.find(
-    (entry) => entry.block === form.block,
-  );
-  const panchayatOptions = selectedBlock?.panchayats || [];
 
-  const telemetryTicket =
-    (focusedTicketId &&
-      grievances.find((ticket) => ticket.id === focusedTicketId)) ||
-    (latestTicket &&
-      (grievances.find((ticket) => ticket.id === latestTicket.id) ||
-        latestTicket)) ||
-    null;
+  // const feed = useMemo(() => {
+  //   let result = [...grievances];
 
-  function focusIncident(ticket) {
-    setFocusedTicketId(ticket.id);
-    if (ticket.district && setSelectedDistrict) {
-      setSelectedDistrict(ticket.district);
-    }
-  }
+  //   if (selectedDistrict) {
+  //     result = result.filter(
+  //       (t) => t.district.toLowerCase() === selectedDistrict.toLowerCase(),
+  //     );
+  //   }
 
-  function openIncidentWorkspace(ticket) {
-    setSelectedTicket(ticket);
-  }
+  //   return result.sort((left, right) => {
+  //     const scoreDelta =
+  //       calculateCompositeScore(right) - calculateCompositeScore(left);
+  //     if (scoreDelta !== 0) {
+  //       return scoreDelta;
+  //     }
+
+  //     const upvoteDelta = right.upvotes - left.upvotes;
+  //     if (upvoteDelta !== 0) {
+  //       return upvoteDelta;
+  //     }
+  //     return (
+  //       new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  //     );
+  //   });
+  // }, [grievances, selectedDistrict]);
+
+  const telemetryTicket = latestTicket
+    ? grievances.find((ticket) => ticket.id === latestTicket.id) || latestTicket
+    : null;
+
+  const telemetryLocation = telemetryTicket
+    ? `${telemetryTicket.district} • ${telemetryTicket.block} • ${telemetryTicket.panchayat}`
+    : "";
+
+  const effectivePriority = telemetryTicket
+    ? getEffectivePriority(telemetryTicket)
+    : "low";
+
+  const priorityMap = {
+    critical: {
+      label: "Critical",
+      colorClass: "border-rose-200 bg-rose-50 text-rose-800",
+    },
+    high: {
+      label: "High",
+      colorClass: "border-amber-200 bg-amber-50 text-amber-800",
+    },
+    medium: {
+      label: "Medium",
+      colorClass: "border-sky-200 bg-sky-50 text-sky-800",
+    },
+    low: {
+      label: "Low",
+      colorClass: "border-slate-200 bg-slate-50 text-slate-700",
+    },
+  };
+
+  const metadata = telemetryTicket
+    ? [
+        {
+          icon: Layers,
+          value: telemetryTicket.infrastructureType,
+        },
+        {
+          icon: ShieldCheck,
+          value: telemetryTicket.terrainRisk,
+        },
+        {
+          icon: Building2,
+          value: telemetryTicket.department,
+        },
+      ]
+    : [];
+
+  const metrics = telemetryTicket
+    ? [
+        {
+          label: "UPVOTES",
+          icon: ThumbsUp,
+          val: telemetryTicket.upvotes,
+        },
+        {
+          label: "SLA",
+          icon: Clock3,
+          val: calculateRemainingSla(telemetryTicket, nowMs),
+        },
+        {
+          label: "REPORTED",
+          icon: CalendarDays,
+          val: formatDateTime(telemetryTicket.createdAt),
+        },
+      ]
+    : [];
+
+  const confidence =
+    telemetryTicket?.upvotes > 35
+      ? "Very High"
+      : telemetryTicket?.upvotes > 20
+        ? "High"
+        : telemetryTicket?.upvotes > 10
+          ? "Medium"
+          : "Low";
+
+  const confidenceBarStyle = {
+    Low: "bg-slate-500 w-1/4",
+    Medium: "bg-amber-500 w-2/4",
+    High: "bg-emerald-700 w-3/4",
+    "Very High": "bg-emerald-800 w-full",
+  }[confidence];
+
+  const lastUpdated = telemetryTicket
+    ? formatRelativeTime(telemetryTicket.createdAt, nowMs)
+    : "";
 
   function updateForm(field, value) {
     setForm((current) => {
@@ -617,27 +798,27 @@ function CivicPillar({
     });
   }
 
-  function submitIntake(event) {
+  function handleSubmit(event) {
     event.preventDefault();
-    setError("");
 
-    if (!form.title.trim() || !form.description.trim()) {
-      setError("Title and description are required for intake registration.");
-      return;
-    }
+    const newTicket = onCreateGrievance(form);
 
-    const ticket = onCreateGrievance(form);
-    setLatestTicket(ticket);
-    setFocusedTicketId(ticket.id);
-    if (setSelectedDistrict) {
-      setSelectedDistrict(ticket.district);
-    }
+    setLatestTicket(newTicket);
+
     setForm((current) => ({
       ...current,
       title: "",
       description: "",
       intakePhotoUrl: "",
     }));
+  }
+
+  async function handleBackendSubmission(ticket) {
+    const normalized = normalizeGrievance(ticket);
+    if (normalized) {
+      setLatestTicket(normalized);
+    }
+    await onRefresh?.();
   }
 
   return (
@@ -668,142 +849,11 @@ function CivicPillar({
       </div>
 
       <div className="grid gap-8 lg:grid-cols-[520px_1fr] items-stretch">
-        <section className="kathkuni-card bg-white p-6 h-full">
-          <PanelHeader
-            eyebrow="Community Intake Portal"
-            icon={Send}
-            title="जन पुकार: Mountain Infrastructure Intake"
+        <section className="bg-white p-0 overflow-hidden">
+          <GrievanceForm
+            backendUrl={backendUrl}
+            onSubmission={handleBackendSubmission}
           />
-
-          <form className="mt-6 grid gap-4" onSubmit={submitIntake}>
-            <div className="grid gap-3 md:grid-cols-3">
-              <Field label="Citizen Name">
-                <input
-                  className={inputClass}
-                  value={form.citizenName}
-                  onChange={(event) =>
-                    updateForm("citizenName", event.target.value)
-                  }
-                />
-              </Field>
-              <Field label="District">
-                <select
-                  className={inputClass}
-                  value={form.district}
-                  onChange={(event) =>
-                    updateForm("district", event.target.value)
-                  }
-                >
-                  {hpLocationMatrix.map((entry) => (
-                    <option key={entry.district} value={entry.district}>
-                      {entry.district}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Block">
-                <select
-                  className={inputClass}
-                  value={form.block}
-                  onChange={(event) => updateForm("block", event.target.value)}
-                >
-                  {blockOptions.map((entry) => (
-                    <option key={entry.block} value={entry.block}>
-                      {entry.block}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-3">
-              <Field label="Gram Panchayat">
-                <select
-                  className={inputClass}
-                  value={form.panchayat}
-                  onChange={(event) =>
-                    updateForm("panchayat", event.target.value)
-                  }
-                >
-                  {panchayatOptions.map((panchayat) => (
-                    <option key={panchayat} value={panchayat}>
-                      {panchayat}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Infrastructure Type">
-                <select
-                  className={inputClass}
-                  value={form.infrastructureType}
-                  onChange={(event) =>
-                    updateForm("infrastructureType", event.target.value)
-                  }
-                >
-                  {infrastructureTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Terrain Risk">
-                <select
-                  className={inputClass}
-                  value={form.terrainRisk}
-                  onChange={(event) =>
-                    updateForm("terrainRisk", event.target.value)
-                  }
-                >
-                  {terrainRisks.map((risk) => (
-                    <option key={risk} value={risk}>
-                      {risk}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            <Field label="Title / Brief Headline">
-              <input
-                className={inputClass}
-                maxLength={150}
-                value={form.title}
-                onChange={(event) => updateForm("title", event.target.value)}
-              />
-            </Field>
-
-            <Field label="Incident Action Description">
-              <textarea
-                className={cx(inputClass, "min-h-32 resize-none")}
-                value={form.description}
-                onChange={(event) =>
-                  updateForm("description", event.target.value)
-                }
-              />
-            </Field>
-
-            <Field label="Evidence Reference Link URL (Optional)">
-              <input
-                className={inputClass}
-                placeholder="https://..."
-                value={form.intakePhotoUrl}
-                onChange={(event) =>
-                  updateForm("intakePhotoUrl", event.target.value)
-                }
-              />
-            </Field>
-
-            {error && <InlineError message={error} />}
-
-            <button
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-sm bg-[var(--devdar-forest)] px-6 text-xs font-bold uppercase tracking-wider text-[#F5F7FA] shadow-xs transition hover:bg-[#132B1F]"
-              type="submit"
-            >
-              <Send className="h-4 w-4" aria-hidden="true" />
-              Submit Incident Claim
-            </button>
-          </form>
         </section>
 
         <div className="h-full min-h-[760px]">
@@ -815,71 +865,42 @@ function CivicPillar({
         </div>
       </div>
 
-        <section className="mt-8 kathkuni-card bg-white p-8">
-          <PanelHeader
-            eyebrow="Intake Result"
-            icon={TimerReset}
-            title="Live Ticket Telemetry State"
-          />
+      <section className="mt-8">
+  {telemetryTicket ? (
+    <LiveTicketTelemetry
+      ticket={{
+        ...telemetryTicket,
+        location: telemetryLocation,
+      }}
+      confidence={confidence}
+      confidenceBarStyle={confidenceBarStyle}
+      lastUpdated={lastUpdated}
+      priorityData={priorityMap[effectivePriority]}
+      metadata={metadata}
+      metrics={metrics}
+      onOpenWorkspace={(id) => {
+        const incident = grievances.find((t) => t.id === id);
+        onOpenIncident?.(incident || telemetryTicket);
+      }}
+    />
+  ) : (
+    <EmptyState
+      icon={Activity}
+      title="No Active Incident"
+      detail="Community reports will appear here once submitted."
+    />
+  )}
+</section>
 
-          {telemetryTicket ? (
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <MetricPill
-                label="Ticket Identification ID"
-                value={telemetryTicket.id}
-              />
-              <MetricPill
-                label="Risk Priority Rank"
-                value={priorityLabel[getEffectivePriority(telemetryTicket)]}
-              />
-              <MetricPill
-                label="Aggregated Upvotes"
-                value={telemetryTicket.upvotes}
-              />
-              <MetricPill
-                label="SLA Target Boundary"
-                value={formatDateTime(telemetryTicket.slaDueAt)}
-              />
-              <div className="sm:col-span-2">
-                <MetricPill
-                  label="Current Status Timeline Track"
-                  value={formatSlaStatus(telemetryTicket, nowMs)}
-                />
-              </div>
-            </div>
-          ) : (
-            <EmptyState
-              detail="Registered structural faults appear here immediately for logging tracking verification."
-              icon={FileText}
-              title="No Active Local Ticket State Listed"
-            />
-          )}
-        </section>
-
-        <section className="mt-8 kathkuni-card bg-white p-8">
-          <PanelHeader
-            eyebrow="Community Discovery"
-            icon={ArrowBigUp}
-            title="Highest Supported Citizen Reports"
-          />
-
-          <p className="mt-2 text-xs text-slate-500">
-            Community reported incidents ranked by public support. Reports with
-            the highest engagement surface first for greater visibility and
-            accountability.
-          </p>
-          <IncidentQueue
-            tickets={grievances}
-            selectedTicketId={focusedTicketId}
-            onSelectIncident={focusIncident}
-            onOpenWorkspace={openIncidentWorkspace}
-            onUpvote={onUpvote}
-            nowMs={nowMs}
-            districts={hpLocationMatrix}
-            criticalThreshold={UPVOTE_CRITICAL_THRESHOLD}
-            priorityLabels={priorityLabel}
-          />
-        </section>
+<IncidentQueue
+  tickets={grievances}
+  selectedTicketId={selectedTicket?.id}
+  onSelectIncident={setSelectedTicket}
+  onOpenWorkspace={onOpenIncident}
+  onUpvote={onUpvote}
+  nowMs={nowMs}
+  districts={hpLocationMatrix}
+/>
 
       {selectedTicket && (
         <ResolutionModal
@@ -895,7 +916,6 @@ function CivicPillar({
           }}
         />
       )}
-
     </div>
   );
 }
@@ -1951,6 +1971,108 @@ function SwipeModal({
   );
 }
 
+function GrievanceFeedCard({ ticket, onUpvote, onViewDetails }) {
+  const effectivePriority = getEffectivePriority(ticket);
+  const isCluster = ticket.upvotes > UPVOTE_CRITICAL_THRESHOLD;
+
+  const localPriorityStyles = {
+    critical:
+      "border-[var(--pahadi-crimson)] bg-rose-50 text-[var(--pahadi-crimson)]",
+    high: "border-[var(--kinnaur-marigold)] bg-amber-50/60 text-amber-950",
+    medium: "border-[var(--dry-wool)] bg-slate-50 text-slate-800",
+    low: "border-slate-200 bg-slate-100 text-slate-600",
+  };
+
+  const localStatusStyles = {
+    Pending: "border-[var(--dry-wool)] bg-white text-slate-800",
+    "Under Verification": "border-sky-300 bg-sky-50 text-sky-900",
+    "Verified Resolved": "border-emerald-300 bg-emerald-50 text-emerald-900",
+    "Reopened via Citizen Veto":
+      "border-[var(--pahadi-crimson)] bg-rose-50 text-[var(--pahadi-crimson)]",
+  };
+
+  return (
+    <article className="rounded-lg border border-slate-200 bg-white p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+      <div className="flex gap-4">
+        <div className="h-40 w-60 shrink-0 overflow-hidden rounded-lg border border-slate-200 shadow-sm">
+          <img
+            src={dummyEvidence}
+            alt="Evidence"
+            className="h-full w-full object-cover"
+          />
+        </div>
+        <div className="flex flex-1 flex-col justify-between">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-bold text-[var(--devdar-forest)] leading-snug">
+              {ticket.title}
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-500">
+              📍 {ticket.district} / {ticket.block} / {ticket.panchayat}
+            </p>
+
+            <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
+              {ticket.description}
+            </p>
+
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <span
+                className={cx(
+                  "inline-flex items-center border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-xs",
+                  localPriorityStyles[effectivePriority],
+                )}
+              >
+                {priorityLabel[effectivePriority]}
+              </span>
+
+              <span
+                className={cx(
+                  "inline-flex items-center border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded-xs",
+                  localStatusStyles[ticket.status],
+                )}
+              >
+                {ticket.status}
+              </span>
+
+              {isCluster && (
+                <span className="border border-[var(--pahadi-crimson)] bg-rose-50 text-[var(--pahadi-crimson)] text-[9px] uppercase tracking-wider rounded-xs py-0.5 px-2 font-bold animate-pulse">
+                  💥 High Threat Emergency
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-[var(--dry-wool)] bg-[#F5F7FA] px-3 text-xs font-bold font-mono text-[var(--devdar-forest)] transition hover:bg-slate-100"
+              onClick={() => onUpvote(ticket.id)}
+              type="button"
+            >
+              <ThumbsUp className="h-3.5 w-3.5 text-[var(--pahadi-crimson)]" />
+              {ticket.upvotes}
+            </button>
+
+            <button
+              className="inline-flex h-8 items-center justify-center rounded-sm border border-slate-300 bg-white px-3 text-xs font-bold uppercase tracking-wider hover:bg-slate-50"
+              onClick={() => onViewDetails(ticket)}
+              type="button"
+            >
+              View Details
+            </button>
+
+            <button
+              className="inline-flex h-8 items-center justify-center rounded-sm border border-slate-300 bg-white px-3 text-xs font-bold uppercase tracking-wider hover:bg-slate-50"
+              type="button"
+            >
+              Share
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function ResolutionModal({ ticket, onClose, onResolve, onVeto }) {
   const [resolutionNotes, setResolutionNotes] = useState("");
   const [validationImageUrl, setValidationImageUrl] = useState("");
@@ -2198,6 +2320,15 @@ function EmptyState({ icon: Icon, title, detail }) {
   );
 }
 
+function calculateCompositeScore(ticket) {
+  const priority = getEffectivePriority(ticket);
+  return (
+    (priority === "critical" ? 60 : 20) +
+    ticket.upvotes * 2 +
+    (ticket.terrainRisk === FLASH_FLOOD_RISK ? 15 : 0)
+  );
+}
+
 function getEffectivePriority(ticket) {
   return ticket.upvotes > UPVOTE_CRITICAL_THRESHOLD
     ? "critical"
@@ -2249,24 +2380,6 @@ function isSlaBreached(ticket, nowMs) {
     ticket.status !== "Verified Resolved" &&
     new Date(ticket.slaDueAt).getTime() < nowMs
   );
-}
-
-function formatSlaStatus(ticket, nowMs) {
-  if (ticket.status === "Verified Resolved") {
-    return "Resolved";
-  }
-
-  const dueAtMs = new Date(ticket.slaDueAt).getTime();
-  if (!Number.isFinite(dueAtMs)) {
-    return "SLA not set";
-  }
-
-  const minutes = Math.round(Math.abs(dueAtMs - nowMs) / 60_000);
-  const duration = formatDuration(minutes);
-
-  return dueAtMs < nowMs
-    ? `⚠️ Breached by ${duration}`
-    : `⏳ ${duration} remaining`;
 }
 
 function formatDuration(totalMinutes) {
