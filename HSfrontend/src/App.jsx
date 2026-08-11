@@ -193,6 +193,7 @@ function normalizeGrievance(ticket) {
     slaDueAt: ticket.sla_due_date || ticket.slaDueAt || new Date().toISOString(),
     intakePhotoUrl: normalizeMediaUrl(ticket.intakePhotoUrl || ticket.intake_photo_url),
     evidenceCount: Number(ticket.evidenceCount || ticket.evidence_count || 0),
+    replyCount: Number(ticket.replyCount || ticket.comment_count || ticket.replies || 0),
     isVerified: Boolean(ticket.is_verified || ticket.isVerified),
     resolutionNotes: ticket.resolutionNotes || "",
     validationImageUrl: normalizeMediaUrl(ticket.validationImageUrl || ""),
@@ -621,6 +622,10 @@ function formatRelativeTime(timestamp, nowMs) {
   return `${days}d ago`;
 }
 
+function HeritageEmptyStateLineArt({ className }) {
+  return <svg aria-hidden="true" className={`pointer-events-none absolute bottom-0 hidden h-28 w-64 text-[#a58a5a]/20 sm:block ${className}`} fill="none" viewBox="0 0 260 112"><path d="M0 96 38 45l20 32 28-51 42 70 30-38 29 39 31-61 42 60" stroke="currentColor" strokeWidth="1.2" /><path d="m0 104 48-26 34 16 31-22 38 19 28-12 31 16 50-11" stroke="currentColor" strokeWidth=".8" /><path d="M31 104v-24m-10 16 10-16 10 16m-15-8 5-16 5 16M76 106V77m-11 18 11-18 11 18m-16-9 5-18 5 18M205 106V73m-13 20 13-20 13 20m-18-10 5-20 5 20" stroke="currentColor" strokeWidth="1" /><path d="M132 105V86l10-10 10 10v19m-15-9h10m-5-20v-8m-5 8h10" stroke="currentColor" strokeWidth="1" /></svg>;
+}
+
 function CivicPillar({
   grievances,
   onCreateGrievance,
@@ -850,7 +855,7 @@ function CivicPillar({
       </div>
 
       <div className="grid gap-8 lg:grid-cols-[520px_1fr] items-stretch">
-        <section className="bg-white p-0 overflow-hidden">
+        <section className="bg-white p-0 overflow-hidden" id="report-issue-form">
           <GrievanceForm
             backendUrl={backendUrl}
             onSubmission={handleBackendSubmission}
@@ -885,11 +890,19 @@ function CivicPillar({
       }}
     />
   ) : (
-    <EmptyState
-      icon={Activity}
-      title="No Active Incident"
-      detail="Community reports will appear here once submitted."
-    />
+    <section className="relative grid min-h-64 place-items-center overflow-hidden rounded-lg border border-dashed border-[#b9aa8d]/70 bg-[#fffefa] px-6 py-8 text-center">
+      <HeritageEmptyStateLineArt className="left-0" />
+      <HeritageEmptyStateLineArt className="right-0 scale-x-[-1]" />
+      <div className="relative z-10 max-w-lg">
+        <div className="mx-auto grid h-10 w-10 place-items-center rounded-sm border border-[#8a6945]/35 bg-[#fffdf7] text-[var(--devdar-forest)]">
+          <FileText className="h-[18px] w-[18px] stroke-[1.6]" aria-hidden="true" />
+        </div>
+        <p className="mt-4 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[var(--devdar-forest)]"><span className="h-px w-7 bg-[#8a6945]/60" />Your Reports<span className="h-px w-7 bg-[#8a6945]/60" /></p>
+        <h3 className="mt-2 font-heading text-[2rem] font-semibold leading-none tracking-[-0.035em] text-[var(--devdar-forest)]">No reports yet</h3>
+        <p className="mt-3 text-sm leading-6 text-slate-600">Have you noticed an issue in your community?<br />Report it and track its journey from submission to resolution — right here.</p>
+        <a className="mt-5 inline-flex h-9 items-center gap-2 rounded-sm border border-[var(--devdar-forest)]/70 bg-[#fffdf7]/80 px-3.5 text-[10px] font-black uppercase tracking-wider text-[var(--devdar-forest)] transition-colors hover:border-[var(--devdar-forest)] hover:bg-[var(--devdar-forest)] hover:text-white" href="#report-issue-form"><FileText className="h-3.5 w-3.5 stroke-[1.8]" />Report an issue<ArrowRight className="h-3.5 w-3.5" /></a>
+      </div>
+    </section>
   )}
 </section>
 

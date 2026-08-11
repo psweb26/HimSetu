@@ -20,6 +20,7 @@ import {
 
 const ALL_FILTER = "all";
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+const UNAUTHENTICATED_COMMENTER = "Community Member";
 
 const defaultPriorityLabels = {
   critical: "Critical Threat",
@@ -266,13 +267,17 @@ function CommunityCard({
   );
 }
 
-function Avatar({ name }) {
+function Avatar({ name, imageUrl = "" }) {
   const initials = String(name || "CM")
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || "CM";
+
+  if (imageUrl) {
+    return <img src={normalizeMediaUrl(imageUrl)} alt="" className="h-8 w-8 shrink-0 rounded-full border border-slate-200 object-cover" />;
+  }
 
   return (
     <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--devdar-forest)] text-[10px] font-black text-white">
@@ -301,18 +306,57 @@ function IncidentImage({ src, className, fallbackClassName }) {
   );
 }
 
+function ImageLightbox({ images, index, onClose, onNavigate }) {
+  useEffect(() => {
+    if (!images.length) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowLeft" && images.length > 1) onNavigate(-1);
+      if (event.key === "ArrowRight" && images.length > 1) onNavigate(1);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [images.length, onClose, onNavigate]);
+
+  if (!images.length) return null;
+  const image = images[index];
+  if (!image) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/85 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Evidence image viewer"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className="relative flex max-h-full w-full max-w-6xl items-center justify-center">
+        <img src={normalizeMediaUrl(image.imageUrl)} alt={image.description || "Evidence image"} className="max-h-[86vh] max-w-full rounded-lg object-contain shadow-2xl" />
+        <button className="absolute right-2 top-2 grid h-10 w-10 place-items-center rounded-full bg-white text-slate-700 shadow-lg" type="button" aria-label="Close image viewer" onClick={onClose}><X className="h-5 w-5" /></button>
+        {images.length > 1 && <>
+          <button className="absolute left-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-white text-slate-700 shadow-lg" type="button" aria-label="Previous image" onClick={() => onNavigate(-1)}><ChevronLeft className="h-5 w-5" /></button>
+          <button className="absolute right-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-white text-slate-700 shadow-lg" type="button" aria-label="Next image" onClick={() => onNavigate(1)}><ChevronRight className="h-5 w-5" /></button>
+        </>}
+      </div>
+    </div>
+  );
+}
+
 function CollaborationModal({
   ticket,
   comments,
-  commenterName,
+  evidence,
+  loading,
+  loadError,
+  nowMs,
   commentText,
   proofPreview,
   submitError,
   submitting,
   onClose,
-  onCommenterNameChange,
   onCommentTextChange,
   onProofFileChange,
+  onOpenLightbox,
   onSubmit,
 }) {
   if (!ticket) return null;
@@ -369,7 +413,7 @@ function CollaborationModal({
                   Evidence
                 </p>
                 <p className="mt-1 text-sm font-black text-slate-900">
-                  {ticket.evidenceCount || 0} records
+                  {evidence.length} records
                 </p>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
@@ -397,13 +441,24 @@ function CollaborationModal({
             <p className="text-[10px] font-black uppercase tracking-widest text-[var(--kinnaur-marigold)]">
               Community Collaboration
             </p>
+
+            <div>
+              <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Evidence gallery</p>
+              {evidence.length ? (
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {evidence.map((item, index) => <button key={item.id} className="overflow-hidden rounded-md border border-slate-200 bg-white" type="button" onClick={() => onOpenLightbox(evidence, index)}><img src={normalizeMediaUrl(item.imageUrl)} alt={item.description || "Evidence"} className="h-16 w-full object-cover" /></button>)}
+                </div>
+              ) : <p className="mt-1 text-xs font-medium text-slate-500">No evidence uploaded yet.</p>}
+            </div>
             <h3 className="mt-1 text-base font-black text-slate-950">
               Comments & Supporting Proof
             </h3>
           </div>
 
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/70 p-4">
-            {comments.length === 0 ? (
+            {loading ? (
+              <div className="grid h-full min-h-48 place-items-center rounded-md border border-slate-200 bg-white text-xs font-bold text-slate-500">Loading persisted collaboration…</div>
+            ) : comments.length === 0 ? (
               <div className="grid h-full min-h-48 place-items-center rounded-md border border-dashed border-slate-200 bg-white p-8 text-center">
                 <div>
                   <MessageCircle className="mx-auto h-6 w-6 text-slate-400" />
@@ -415,14 +470,14 @@ function CollaborationModal({
             ) : (
               comments.map((comment) => (
                 <article key={comment.id} className="flex items-start gap-3">
-                  <Avatar name={comment.author} />
+                  <Avatar name={comment.author} imageUrl={comment.avatarUrl} />
                   <div className="min-w-0 max-w-[86%]">
                     <div className="mb-1 flex items-center gap-2">
                       <p className="text-xs font-black text-slate-800">
                         {comment.author}
                       </p>
                       <span className="text-[9px] font-semibold text-slate-400">
-                        {formatRelativeTime(comment.createdAt, Date.now())}
+                        {formatRelativeTime(comment.createdAt, nowMs)}
                       </span>
                     </div>
                     {comment.text && (
@@ -431,11 +486,7 @@ function CollaborationModal({
                       </div>
                     )}
                     {comment.imageUrl && (
-                      <img
-                        src={normalizeMediaUrl(comment.imageUrl)}
-                        alt=""
-                        className="mt-2 max-h-56 w-full rounded-xl border border-slate-200 object-cover shadow-sm"
-                      />
+                      <button className="mt-2 block overflow-hidden rounded-xl border border-slate-200" type="button" onClick={() => onOpenLightbox(evidence, Math.max(0, evidence.findIndex((item) => item.id === comment.evidenceId)))}><img src={normalizeMediaUrl(comment.imageUrl)} alt="Attached community proof" className="max-h-56 w-full object-cover shadow-sm" /></button>
                     )}
                   </div>
                 </article>
@@ -445,13 +496,8 @@ function CollaborationModal({
 
           <form className="border-t border-slate-200 bg-white p-3" onSubmit={onSubmit}>
             <div className="mb-2 flex items-center gap-3">
-              <Avatar name={commenterName} />
-              <input
-                className="h-8 w-52 rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 outline-none focus:border-[var(--devdar-forest)] focus:bg-white"
-                placeholder="Your name"
-                value={commenterName}
-                onChange={(event) => onCommenterNameChange(event.target.value)}
-              />
+              <Avatar name={UNAUTHENTICATED_COMMENTER} />
+              <p className="text-xs font-black text-slate-700">{UNAUTHENTICATED_COMMENTER}</p>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-1.5">
@@ -510,6 +556,7 @@ function CollaborationModal({
                 {submitError}
               </p>
             )}
+            {loadError && <p className="mt-2 text-xs font-bold text-[var(--pahadi-crimson)]">{loadError}</p>}
           </form>
         </div>
       </section>
@@ -531,9 +578,12 @@ export default function IncidentQueue({
   const [statusFilter, setStatusFilter] = useState(ALL_FILTER);
   const [sortBy, setSortBy] = useState("upvotes");
   const [pageIndex, setPageIndex] = useState(0);
+  const [carouselDirection, setCarouselDirection] = useState("forward");
+  const [isCarouselSliding, setIsCarouselSliding] = useState(false);
   const [collaborationTicket, setCollaborationTicket] = useState(null);
-  const [commentsByTicket, setCommentsByTicket] = useState({});
-  const [commenterName, setCommenterName] = useState("Community Member");
+  const [collaborationLoading, setCollaborationLoading] = useState(false);
+  const [collaborationError, setCollaborationError] = useState("");
+  const [lightbox, setLightbox] = useState(null);
   const [commentText, setCommentText] = useState("");
   const [proofFile, setProofFile] = useState(null);
   const [proofPreview, setProofPreview] = useState("");
@@ -613,24 +663,71 @@ export default function IncidentQueue({
     setPageIndex(0);
   }, [searchQuery, statusFilter, sortBy, filteredTickets.length]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredTickets.length / 2));
-  const pageTickets = filteredTickets.slice(pageIndex * 2, pageIndex * 2 + 2);
+  const maxCarouselIndex = Math.max(0, filteredTickets.length - 2);
+  const pageTickets = filteredTickets.slice(pageIndex, pageIndex + 2);
   const showLeftArrow = filteredTickets.length > 2 && pageIndex > 0;
-  const showRightArrow = filteredTickets.length > 2 && pageIndex < totalPages - 1;
+  const showRightArrow = filteredTickets.length > 2 && pageIndex < maxCarouselIndex;
   const supportCount = tickets.reduce((sum, ticket) => sum + Number(ticket.upvotes || 0), 0);
-  const activeComments = collaborationTicket
-    ? commentsByTicket[collaborationTicket.id] || []
-    : [];
+  const activeComments = collaborationTicket?.comments || [];
+  const activeEvidence = collaborationTicket?.evidence || [];
+
+  function moveCarousel(offset) {
+    if (isCarouselSliding) return;
+    const next = Math.max(0, Math.min(maxCarouselIndex, pageIndex + offset));
+    if (next === pageIndex) return;
+    setCarouselDirection(offset > 0 ? "forward" : "backward");
+    setIsCarouselSliding(true);
+    setPageIndex(next);
+  }
+
+  function normalizeCollaborationPayload(ticket, payload) {
+    return {
+      ...ticket,
+      evidence: (payload.evidence || [])
+        .filter((item) => item.image_url || item.imageUrl)
+        .map((item) => ({
+          id: item.id,
+          imageUrl: item.image_url || item.imageUrl,
+          description: item.description || item.summary || "Evidence image",
+        })),
+      comments: (payload.community_comments || []).map((item) => ({
+        id: item.id,
+        author: item.author || "Community Member",
+        text: item.text || item.comment || "",
+        imageUrl: item.image_url || item.imageUrl || "",
+        evidenceId: item.evidence_id || item.evidenceId || null,
+        createdAt: item.created_at || item.createdAt,
+      })),
+    };
+  }
+
+  async function loadCollaboration(ticket) {
+    const response = await fetch(`${BACKEND_URL}/api/incidents/${ticket.id}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.detail || "Unable to load persisted collaboration.");
+    }
+    const payload = await response.json();
+    setCollaborationTicket((current) => (
+      current?.id === ticket.id ? normalizeCollaborationPayload(current, payload) : current
+    ));
+  }
 
   function openCollaboration(ticket) {
-    setCollaborationTicket(ticket);
+    setCollaborationTicket({ ...ticket, comments: [], evidence: [] });
+    setCollaborationLoading(true);
+    setCollaborationError("");
     setSubmitError("");
     setCommentText("");
     setProofFile(null);
+    loadCollaboration(ticket)
+      .catch((error) => setCollaborationError(error.message))
+      .finally(() => setCollaborationLoading(false));
   }
 
   function closeCollaboration() {
     setCollaborationTicket(null);
+    setCollaborationError("");
     setSubmitError("");
     setCommentText("");
     setProofFile(null);
@@ -645,7 +742,7 @@ export default function IncidentQueue({
 
     const formData = new FormData();
     formData.append("comment", commentText.trim() || "Proof image attached.");
-    formData.append("uploadedBy", commenterName.trim() || "Community Member");
+    formData.append("uploadedBy", UNAUTHENTICATED_COMMENTER);
     if (proofFile) formData.append("file", proofFile);
 
     try {
@@ -662,22 +759,8 @@ export default function IncidentQueue({
         throw new Error(payload?.detail || "Unable to post community reply.");
       }
 
-      const payload = await response.json();
-      const newComment = {
-        id: `${collaborationTicket.id}-${Date.now()}`,
-        author: payload.author || commenterName.trim() || "Community Member",
-        text: payload.comment || commentText.trim(),
-        imageUrl: normalizeMediaUrl(payload.image_url) || proofPreview,
-        createdAt: payload.created_at || new Date().toISOString(),
-      };
-
-      setCommentsByTicket((current) => ({
-        ...current,
-        [collaborationTicket.id]: [
-          ...(current[collaborationTicket.id] || []),
-          newComment,
-        ],
-      }));
+      await response.json();
+      await loadCollaboration(collaborationTicket);
       setCommentText("");
       setProofFile(null);
     } catch (error) {
@@ -794,7 +877,8 @@ export default function IncidentQueue({
             className="absolute left-0 top-1/2 z-10 grid h-10 w-10 -translate-x-3 -translate-y-1/2 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-lg transition hover:border-[var(--devdar-forest)] hover:text-[var(--devdar-forest)]"
             type="button"
             aria-label="Previous community reports"
-            onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
+            disabled={isCarouselSliding}
+            onClick={() => moveCarousel(-1)}
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -804,9 +888,8 @@ export default function IncidentQueue({
             className="absolute right-0 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 translate-x-3 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-lg transition hover:border-[var(--devdar-forest)] hover:text-[var(--devdar-forest)]"
             type="button"
             aria-label="Next community reports"
-            onClick={() =>
-              setPageIndex((current) => Math.min(totalPages - 1, current + 1))
-            }
+            disabled={isCarouselSliding}
+            onClick={() => moveCarousel(1)}
           >
             <ChevronRight className="h-5 w-5" />
           </button>
@@ -814,14 +897,15 @@ export default function IncidentQueue({
 
         <div
           key={pageIndex}
-          className="grid gap-3 transition-all duration-300 ease-out animate-in fade-in slide-in-from-right-2 lg:grid-cols-2"
+          className={`grid gap-3 lg:grid-cols-2 ${carouselDirection === "forward" ? "community-carousel-slide-forward" : "community-carousel-slide-backward"}`}
+          onAnimationEnd={() => setIsCarouselSliding(false)}
         >
         {pageTickets.length > 0 ? (
           pageTickets.map((ticket) => {
             const effectivePriority = getEffectivePriority(ticket, criticalThreshold);
             const displayTicket = {
               ...ticket,
-              replyCount: commentsByTicket[ticket.id]?.length || ticket.replyCount || 0,
+              replyCount: collaborationTicket?.id === ticket.id ? activeComments.length : ticket.replyCount || 0,
             };
             return (
               <CommunityCard
@@ -852,16 +936,25 @@ export default function IncidentQueue({
       <CollaborationModal
         ticket={collaborationTicket}
         comments={activeComments}
-        commenterName={commenterName}
+        evidence={activeEvidence}
+        loading={collaborationLoading}
+        loadError={collaborationError}
+        nowMs={nowMs}
         commentText={commentText}
         proofPreview={proofPreview}
         submitError={submitError}
         submitting={submitting}
         onClose={closeCollaboration}
-        onCommenterNameChange={setCommenterName}
         onCommentTextChange={setCommentText}
         onProofFileChange={setProofFile}
+        onOpenLightbox={(images, index) => setLightbox({ images, index })}
         onSubmit={submitCommunityReply}
+      />
+      <ImageLightbox
+        images={lightbox?.images || []}
+        index={lightbox?.index || 0}
+        onClose={() => setLightbox(null)}
+        onNavigate={(direction) => setLightbox((current) => current && ({ ...current, index: (current.index + direction + current.images.length) % current.images.length }))}
       />
     </section>
   );

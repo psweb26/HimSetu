@@ -317,6 +317,7 @@ def get_incident(
         }
         for e in evidence_list
     ],
+    "community_comments": serialize_community_comments(db, incident.id),
 }
 
 @app.post("/api/incidents/manual-inject")
@@ -364,6 +365,7 @@ class GrievanceResponse(BaseModel):
     priority: str
     intakePhotoUrl: str = ""
     evidenceCount: int = 0
+    replyCount: int = 0
     sla_due_date: datetime
     created_at: datetime
     resolved_at: Optional[datetime] = None
@@ -736,6 +738,51 @@ def append_incident_evidence(
     db.add(evidence)
     db.flush()
     return evidence
+
+
+COMMUNITY_REPLY_PATTERN = re.compile(r"^Community reply by (?P<author>.+?): (?P<comment>.*)$", re.DOTALL)
+
+
+def serialize_community_comments(db: Session, incident_id: int) -> List[Dict[str, Any]]:
+    """Return persisted collaboration replies with their optional proof record.
+
+    Replies predate a dedicated comment table and are deliberately kept in the
+    incident ledger.  The author and body are encoded in the existing ledger
+    reason, while the optional evidence_id links the reply to its proof image.
+    """
+    transitions = (
+        db.query(EventStateTransition)
+        .filter(
+            EventStateTransition.incident_id == incident_id,
+            EventStateTransition.actor_type.in_(("Community", "Citizen")),
+        )
+        .order_by(EventStateTransition.created_at.asc(), EventStateTransition.id.asc())
+        .all()
+    )
+    evidence_by_id = {
+        evidence.id: evidence
+        for evidence in db.query(Evidence)
+        .filter(Evidence.incident_id == incident_id)
+        .all()
+    }
+
+    comments: List[Dict[str, Any]] = []
+    for transition in transitions:
+        match = COMMUNITY_REPLY_PATTERN.match(transition.reason or "")
+        evidence = evidence_by_id.get(transition.evidence_id)
+        comments.append({
+            "id": transition.id,
+            "author": (match.group("author").strip() if match else transition.actor_type) or "Community Member",
+            "text": match.group("comment") if match else (transition.reason or ""),
+            "image_url": (
+                evidence.image_url or (evidence.payload or {}).get("image_url")
+                if evidence else None
+            ),
+            "evidence_id": transition.evidence_id,
+            "created_at": to_iso(transition.created_at),
+        })
+    return comments
+
 
 def get_primary_grievance_for_incident(db: Session, incident_id: int) -> Optional[Grievance]:
     return (
@@ -1150,6 +1197,10 @@ def calculate_composite_score(grievance: Grievance) -> int:
 
 def serialize_grievance(grievance: Grievance) -> GrievanceResponse:
     evidence_count = len(grievance.incident.evidence_list) if grievance.incident else 0
+    reply_count = (
+        sum(item.actor_type in {"Community", "Citizen"} for item in grievance.incident.transitions)
+        if grievance.incident else 0
+    )
     return GrievanceResponse(
         id=grievance.id,
         ticket_id=grievance.ticket_id,
@@ -1170,6 +1221,7 @@ def serialize_grievance(grievance: Grievance) -> GrievanceResponse:
         priority=enum_value(grievance.priority),
         intakePhotoUrl=grievance.intake_photo_url or "",
         evidenceCount=evidence_count,
+        replyCount=reply_count,
         sla_due_date=grievance.sla_due_date,
         created_at=grievance.created_at,
         resolved_at=grievance.resolved_at,
@@ -1615,7 +1667,7 @@ def upload_incident_evidence(
         verification_status="Pending Verification",
         source_priority=40,
     )
-    append_incident_timeline(
+    transition = append_incident_timeline(
         db=db,
         incident=incident,
         to_state=incident.current_state,
@@ -1626,6 +1678,7 @@ def upload_incident_evidence(
 
     try:
         db.commit()
+        db.refresh(transition)
         db.refresh(evidence)
     except SQLAlchemyError as exc:
         db.rollback()
@@ -1670,7 +1723,7 @@ def add_community_reply(
         )
         evidence_id = evidence.id
 
-    append_incident_timeline(
+    transition = append_incident_timeline(
         db=db,
         incident=incident,
         to_state=incident.current_state,
@@ -1681,19 +1734,21 @@ def add_community_reply(
 
     try:
         db.commit()
+        db.refresh(transition)
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Community reply commit error.") from exc
 
     grievance = get_primary_grievance_for_incident(db, incident.id)
     return {
+        "id": transition.id,
         "incident_id": incident.id,
         "ticket_id": grievance.ticket_id if grievance else f"INC-{incident.id}",
         "author": display_name,
         "comment": comment_text,
         "image_url": image_url,
         "evidence_id": evidence_id,
-        "created_at": to_iso(utc_now()),
+        "created_at": to_iso(transition.created_at),
     }
 
 @app.post("/api/incidents/{incident_id}/duplicates")
