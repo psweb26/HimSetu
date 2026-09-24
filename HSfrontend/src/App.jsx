@@ -42,6 +42,7 @@ import GrievanceForm from "./components/GrievanceForm";
 
 import LiveTicketTelemetry from "./components/LiveTicketTelemetry";
 import dummyEvidence from "./assets/images/dummy_evidence.png";
+import janPukaarCinematicHero from "./assets/images/jan-pukaar-cinematic-hero.png";
 import HimachalVectorMap from "./components/HimachalVectorMap";
 import IdentityMosaic from "./components/IdentityMosaic";
 import himachalCrest from "./assets/images/himachal-crest.png";
@@ -829,30 +830,9 @@ function CivicPillar({
 
   return (
     <div className="space-y-6">
-      <div className="glass-panel p-6 flex flex-col md:flex-row items-center gap-6 overflow-hidden relative">
-        <div className="flex-1 space-y-2">
-          <span className="text-[10px] bg-[var(--kinnaur-marigold)] text-slate-950 font-black px-2.5 py-1 rounded-2xs uppercase tracking-widest">
-            Public Interface Core
-          </span>
-          <h2 className="text-xl font-black text-[var(--devdar-forest)] uppercase tracking-tight">
-            जन पुकार / Civic Accountability Dashboard
-          </h2>
-          <p className="text-xs text-slate-600 max-w-3xl leading-relaxed">
-            A decentralized oversight network enabling citizens to flag
-            structural damage—inspired by regional engineering resilience. Track
-            road shoulder failure, cracked retaining walls, or structural strain
-            on critical infrastructure links before they escalate into transit
-            blockades.
-          </p>
-        </div>
-        <div className="w-32 h-20 shrink-0 bg-slate-100 rounded-sm border border-[var(--dry-wool)] flex flex-col items-center justify-center p-2 text-center text-[10px] font-bold text-slate-500 font-mono">
-          <span>KATH-KUNI</span>
-          <span className="text-lg mt-0.5">🪵🪨</span>
-          <span className="text-[8px] text-slate-400 font-sans mt-0.5">
-            Structural Grid Pattern
-          </span>
-        </div>
-      </div>
+      <figure className="group h-[clamp(13rem,37vw,34rem)] overflow-hidden rounded-lg border border-[#b9aa8d]/40 bg-[var(--spiti-snow)]">
+        <img alt="Jan Pukaar community scene in a Himachal mountain village, with an HRTC bus, villagers, and traditional architecture" className="h-full w-full object-cover object-center transition duration-700 ease-out motion-reduce:transition-none group-hover:scale-[1.01]" src={janPukaarCinematicHero} />
+      </figure>
 
       <div className="grid gap-8 lg:grid-cols-[520px_1fr] items-stretch">
         <section className="bg-white p-0 overflow-hidden" id="report-issue-form">
