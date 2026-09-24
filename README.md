@@ -5,7 +5,7 @@
 HimSetu brings together three experiences that are usually disconnected: a citizen-facing place to report and follow infrastructure issues, a live operations view for monsoon and transit conditions, and a digital archive celebrating Himachal's living heritage. It is designed around the administrative realities, terrain risks, and cultural context of the state.
 
 <p align="center">
-  <img src="HSfrontend/src/assets/images/jan-pukaar-cinematic-hero.png" alt="HimSetu Jan Pukaar civic accountability interface" width="900" />
+  <img src="HSfrontend/src/assets/images/Readme-hero-img.jpeg" alt="HimSetu Jan Pukaar civic accountability interface" width="900" />
 </p>
 
 ## Why HimSetu?
@@ -33,9 +33,6 @@ Public support, resolution evidence, or citizen reopen request
 | **Hamari Virasat** | A curated cultural canvas for Himachal's places, traditions, craft, food, music, and community identity. |
 | **Admin command centre** | Protected tools for complaint operations, community discovery, heritage management, locations, users, and system status. |
 
-<p align="center">
-  <img src="HSfrontend/src/assets/images/hamari-virasat-village-hero.png" alt="Hamari Virasat cultural heritage experience" width="900" />
-</p>
 
 ## Key capabilities
 
